@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project specific
+tmp/
+*.txt
+!requirements.txt
+config/accounts.json
+title.txt
+content.txt
+comment.txt
+
+# Ralph Loop state
+.claude/.ralph-loop.local.md
