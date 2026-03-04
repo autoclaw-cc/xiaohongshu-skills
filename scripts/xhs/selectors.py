@@ -64,5 +64,16 @@ TAG_FIRST_ITEM = ".item"
 # 弹窗
 POPOVER = "div.d-popover"
 
+# ========== 写长文模式 ==========
+# 注意: 长文模式的按钮（写长文、新的创作、一键排版、下一步）通过文本匹配定位
+LONG_ARTICLE_TAB_TEXT = "写长文"
+NEW_CREATION_BUTTON_TEXT = "新的创作"
+AUTO_FORMAT_BUTTON_TEXT = "一键排版"
+NEXT_STEP_BUTTON_TEXT = "下一步"
+
+LONG_ARTICLE_TITLE = 'textarea.d-text[placeholder="输入标题"]'
+TEMPLATE_CARD = ".template-card"
+TEMPLATE_TITLE = ".template-card .template-title"
+
 # ========== 用户主页 ==========
 SIDEBAR_PROFILE = "div.main-container li.user.side-bar-component a.link-wrapper span.channel"

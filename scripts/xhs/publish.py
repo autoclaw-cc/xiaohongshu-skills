@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 def publish_image_content(page: Page, content: PublishImageContent) -> None:
-    """发布图文内容。
+    """发布图文内容（填写表单 + 点击发布）。
 
     Args:
         page: CDP 页面对象。
@@ -45,6 +45,23 @@ def publish_image_content(page: Page, content: PublishImageContent) -> None:
 
     Raises:
         PublishError: 发布失败。
+        UploadTimeoutError: 上传超时。
+        TitleTooLongError: 标题超长。
+        ContentTooLongError: 正文超长。
+    """
+    fill_publish_form(page, content)
+    click_publish_button(page)
+
+
+def fill_publish_form(page: Page, content: PublishImageContent) -> None:
+    """填写图文发布表单，不点击发布按钮。
+
+    Args:
+        page: CDP 页面对象。
+        content: 发布内容。
+
+    Raises:
+        PublishError: 填写失败。
         UploadTimeoutError: 上传超时。
         TitleTooLongError: 标题超长。
         ContentTooLongError: 正文超长。
@@ -77,8 +94,8 @@ def publish_image_content(page: Page, content: PublishImageContent) -> None:
         content.visibility,
     )
 
-    # 提交发布
-    _submit_publish(
+    # 填写表单（不点击发布）
+    _fill_publish_form(
         page,
         content.title,
         content.content,
@@ -87,6 +104,20 @@ def publish_image_content(page: Page, content: PublishImageContent) -> None:
         content.is_original,
         content.visibility,
     )
+
+
+def click_publish_button(page: Page) -> None:
+    """点击发布按钮。
+
+    Args:
+        page: CDP 页面对象。
+
+    Raises:
+        PublishError: 点击失败。
+    """
+    page.click_element(PUBLISH_BUTTON)
+    time.sleep(3)
+    logger.info("发布完成")
 
 
 # ========== 页面导航 ==========
@@ -192,7 +223,7 @@ def _wait_for_upload_complete(page: Page, expected_count: int) -> None:
 # ========== 表单提交 ==========
 
 
-def _submit_publish(
+def _fill_publish_form(
     page: Page,
     title: str,
     content: str,
@@ -201,7 +232,7 @@ def _submit_publish(
     is_original: bool,
     visibility: str,
 ) -> None:
-    """填写表单并提交。"""
+    """填写表单（不点击发布）。"""
     # 标题
     page.input_text(TITLE_INPUT, title)
     time.sleep(0.5)
@@ -240,10 +271,7 @@ def _submit_publish(
         except Exception as e:
             logger.warning("设置原创声明失败: %s", e)
 
-    # 点击发布
-    page.click_element(PUBLISH_BUTTON)
-    time.sleep(3)
-    logger.info("发布完成")
+    logger.info("表单填写完成，等待确认发布")
 
 
 def _find_content_element(page: Page) -> str:

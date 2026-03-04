@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def publish_video_content(page: Page, content: PublishVideoContent) -> None:
-    """发布视频内容。
+    """发布视频内容（填写表单 + 点击发布）。
 
     Args:
         page: CDP 页面对象。
@@ -36,6 +36,21 @@ def publish_video_content(page: Page, content: PublishVideoContent) -> None:
 
     Raises:
         PublishError: 发布失败。
+        UploadTimeoutError: 上传/处理超时。
+    """
+    fill_publish_video_form(page, content)
+    click_publish_video_button(page)
+
+
+def fill_publish_video_form(page: Page, content: PublishVideoContent) -> None:
+    """填写视频发布表单，不点击发布按钮。
+
+    Args:
+        page: CDP 页面对象。
+        content: 视频发布内容。
+
+    Raises:
+        PublishError: 填写失败。
         UploadTimeoutError: 上传/处理超时。
     """
     if not content.video_path:
@@ -51,8 +66,8 @@ def publish_video_content(page: Page, content: PublishVideoContent) -> None:
     # 上传视频
     _upload_video(page, content.video_path)
 
-    # 提交
-    _submit_publish_video(
+    # 填写表单（不点击发布）
+    _fill_publish_video_form(
         page,
         content.title,
         content.content,
@@ -60,6 +75,18 @@ def publish_video_content(page: Page, content: PublishVideoContent) -> None:
         content.schedule_time,
         content.visibility,
     )
+
+
+def click_publish_video_button(page: Page) -> None:
+    """点击视频发布按钮。
+
+    Args:
+        page: CDP 页面对象。
+    """
+    _wait_for_publish_button_clickable(page)
+    page.click_element(PUBLISH_BUTTON)
+    time.sleep(3)
+    logger.info("视频发布完成")
 
 
 def _upload_video(page: Page, video_path: str) -> None:
@@ -104,7 +131,7 @@ def _wait_for_publish_button_clickable(page: Page) -> None:
     raise UploadTimeoutError("等待发布按钮可点击超时(10分钟)")
 
 
-def _submit_publish_video(
+def _fill_publish_video_form(
     page: Page,
     title: str,
     content: str,
@@ -112,7 +139,7 @@ def _submit_publish_video(
     schedule_time: str | None,
     visibility: str,
 ) -> None:
-    """填写视频表单并提交。"""
+    """填写视频表单（不点击发布）。"""
     # 标题
     page.input_text(TITLE_INPUT, title)
     time.sleep(1)
@@ -136,13 +163,7 @@ def _submit_publish_video(
     # 可见范围
     _set_visibility(page, visibility)
 
-    # 等待发布按钮可点击
-    _wait_for_publish_button_clickable(page)
-
-    # 点击发布
-    page.click_element(PUBLISH_BUTTON)
-    time.sleep(3)
-    logger.info("视频发布完成")
+    logger.info("视频表单填写完成，等待确认发布")
 
 
 def _js_str(s: str) -> str:

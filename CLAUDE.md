@@ -25,10 +25,11 @@ xiaohongshu-skills/
 │   │   ├── user_profile.py         # 用户主页
 │   │   ├── comment.py              # 评论、回复
 │   │   ├── like_favorite.py        # 点赞、收藏
-│   │   ├── publish.py              # 图文发布
-│   │   └── publish_video.py        # 视频发布
-│   ├── cli.py                      # 统一 CLI 入口（13 个子命令）
-│   ├── chrome_launcher.py          # Chrome 进程管理
+│   │   ├── publish.py              # 图文发布（fill + click 分步支持）
+│   │   ├── publish_video.py        # 视频发布（fill + click 分步支持）
+│   │   └── publish_long_article.py # 长文发布（模板选择 + 排版）
+│   ├── cli.py                      # 统一 CLI 入口（19 个子命令）
+│   ├── chrome_launcher.py          # Chrome 进程管理（含 restart 降级）
 │   ├── account_manager.py          # 多账号管理
 │   ├── image_downloader.py         # 媒体下载（SHA256 缓存）
 │   ├── title_utils.py              # UTF-16 标题长度计算
@@ -72,7 +73,7 @@ uv run pytest              # 运行测试
 1. **scripts/ — Python CDP 引擎**
    - 基于 xiaohongshu-mcp Go 源码从零重写
    - `xhs/` 包：模块化的核心自动化库
-   - `cli.py`：统一 CLI 入口，13 个子命令对应 MCP 工具
+   - `cli.py`：统一 CLI 入口，19 个子命令（13 个 MCP + 6 个增强）
    - JSON 结构化输出，便于 agent 解析
    - 多账号支持，独立 Chrome Profile 隔离
    - 反检测保护（stealth flags + JS 注入）
@@ -123,11 +124,11 @@ python scripts/publish_pipeline.py --title-file t.txt --content-file c.txt --ima
 
 - **xiaohongshu-mcp Go 源码**: /Users/zy/src/zy/xiaohongshu-mcp/
 
-## MCP 工具对照表
+## CLI 子命令对照表
 
-scripts/cli.py 的 13 个子命令对应 xiaohongshu-mcp 的 MCP 工具：
+scripts/cli.py 的 19 个子命令：
 
-| CLI 子命令 | MCP 工具 | 分类 |
+| CLI 子命令 | 对应 MCP 工具 | 分类 |
 |--|--|--|
 | `check-login` | check_login_status | 认证 |
 | `login` | get_login_qrcode | 认证 |
@@ -142,3 +143,9 @@ scripts/cli.py 的 13 个子命令对应 xiaohongshu-mcp 的 MCP 工具：
 | `favorite-feed` | favorite_feed | 互动 |
 | `publish` | publish_content | 发布 |
 | `publish-video` | publish_with_video | 发布 |
+| `fill-publish` | — | 分步发布（图文填写） |
+| `fill-publish-video` | — | 分步发布（视频填写） |
+| `click-publish` | — | 分步发布（点击发布） |
+| `long-article` | — | 长文发布（填写+排版） |
+| `select-template` | — | 长文发布（选择模板） |
+| `next-step` | — | 长文发布（下一步+描述） |

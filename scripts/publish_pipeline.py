@@ -29,8 +29,11 @@ def run_publish_pipeline(
     host: str = "127.0.0.1",
     port: int = 9222,
     account: str = "",
+    headless: bool = False,
 ) -> dict:
     """执行完整发布流水线。
+
+    当 headless=True 且未登录时，自动降级到有窗口模式。
 
     Returns:
         发布结果字典。
@@ -56,7 +59,28 @@ def run_publish_pipeline(
         try:
             # 登录检查
             if not check_login_status(page):
-                return {"success": False, "error": "未登录", "exit_code": 1}
+                browser.close_page(page)
+                browser.close()
+
+                # Headless 自动降级：切换到有窗口模式
+                if headless:
+                    from chrome_launcher import restart_chrome
+
+                    logger.info("Headless 模式未登录，切换到有窗口模式...")
+                    restart_chrome(port=port, headless=False)
+                    return {
+                        "success": False,
+                        "error": "未登录",
+                        "action": "switched_to_headed",
+                        "message": "已切换到有窗口模式，请在浏览器中扫码登录",
+                        "exit_code": 1,
+                    }
+
+                return {
+                    "success": False,
+                    "error": "未登录",
+                    "exit_code": 1,
+                }
 
             # 发布
             if video:
@@ -113,6 +137,7 @@ def main() -> None:
     parser.add_argument("--schedule-at", help="定时发布时间 (ISO8601)")
     parser.add_argument("--original", action="store_true", help="声明原创")
     parser.add_argument("--visibility", default="", help="可见范围")
+    parser.add_argument("--headless", action="store_true", help="无头模式（未登录自动降级）")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9222)
     parser.add_argument("--account", default="")
@@ -136,10 +161,12 @@ def main() -> None:
         host=args.host,
         port=args.port,
         account=args.account,
+        headless=args.headless,
     )
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    sys.exit(0 if result["success"] else 2)
+    exit_code = result.get("exit_code", 0 if result["success"] else 2)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

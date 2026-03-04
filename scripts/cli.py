@@ -35,6 +35,23 @@ def _connect(args: argparse.Namespace):
     return browser, page
 
 
+def _headless_fallback(port: int) -> None:
+    """Headless 模式未登录时自动降级到有窗口模式。"""
+    from chrome_launcher import restart_chrome
+
+    logger.info("Headless 模式未登录，切换到有窗口模式...")
+    restart_chrome(port=port, headless=False)
+    _output(
+        {
+            "success": False,
+            "error": "未登录",
+            "action": "switched_to_headed",
+            "message": "已切换到有窗口模式，请在浏览器中扫码登录",
+        },
+        exit_code=1,
+    )
+
+
 # ========== 子命令实现 ==========
 
 
@@ -234,6 +251,7 @@ def cmd_favorite_feed(args: argparse.Namespace) -> None:
 def cmd_publish(args: argparse.Namespace) -> None:
     """发布图文内容。"""
     from image_downloader import process_images
+    from xhs.login import check_login_status
     from xhs.publish import publish_image_content
     from xhs.types import PublishImageContent
 
@@ -250,6 +268,14 @@ def cmd_publish(args: argparse.Namespace) -> None:
 
     browser, page = _connect(args)
     try:
+        # headless 模式登录检查 + 自动降级
+        headless = getattr(args, "headless", False)
+        if headless and not check_login_status(page):
+            browser.close_page(page)
+            browser.close()
+            _headless_fallback(args.port)
+            return
+
         publish_image_content(
             page,
             PublishImageContent(
@@ -268,8 +294,164 @@ def cmd_publish(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_fill_publish(args: argparse.Namespace) -> None:
+    """只填写图文表单，不发布。"""
+    from image_downloader import process_images
+    from xhs.publish import fill_publish_form
+    from xhs.types import PublishImageContent
+
+    with open(args.title_file, encoding="utf-8") as f:
+        title = f.read().strip()
+    with open(args.content_file, encoding="utf-8") as f:
+        content = f.read().strip()
+
+    image_paths = process_images(args.images) if args.images else []
+    if not image_paths:
+        _output({"success": False, "error": "没有有效的图片"}, exit_code=2)
+
+    browser, page = _connect(args)
+    try:
+        fill_publish_form(
+            page,
+            PublishImageContent(
+                title=title,
+                content=content,
+                tags=args.tags or [],
+                image_paths=image_paths,
+                schedule_time=args.schedule_at,
+                is_original=args.original,
+                visibility=args.visibility or "",
+            ),
+        )
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "images": len(image_paths),
+                "status": "表单已填写，等待确认发布",
+            }
+        )
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
+def cmd_fill_publish_video(args: argparse.Namespace) -> None:
+    """只填写视频表单，不发布。"""
+    from xhs.publish_video import fill_publish_video_form
+    from xhs.types import PublishVideoContent
+
+    with open(args.title_file, encoding="utf-8") as f:
+        title = f.read().strip()
+    with open(args.content_file, encoding="utf-8") as f:
+        content = f.read().strip()
+
+    browser, page = _connect(args)
+    try:
+        fill_publish_video_form(
+            page,
+            PublishVideoContent(
+                title=title,
+                content=content,
+                tags=args.tags or [],
+                video_path=args.video,
+                schedule_time=args.schedule_at,
+                visibility=args.visibility or "",
+            ),
+        )
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "video": args.video,
+                "status": "视频表单已填写，等待确认发布",
+            }
+        )
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
+def cmd_click_publish(args: argparse.Namespace) -> None:
+    """点击发布按钮（在用户确认后调用）。"""
+    from xhs.publish import click_publish_button
+
+    browser, page = _connect(args)
+    try:
+        click_publish_button(page)
+        _output({"success": True, "status": "发布完成"})
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
+def cmd_long_article(args: argparse.Namespace) -> None:
+    """长文模式：填写内容 + 一键排版，返回模板列表。"""
+    from xhs.publish_long_article import publish_long_article
+
+    with open(args.title_file, encoding="utf-8") as f:
+        title = f.read().strip()
+    with open(args.content_file, encoding="utf-8") as f:
+        content = f.read().strip()
+
+    browser, page = _connect(args)
+    try:
+        template_names = publish_long_article(
+            page,
+            title=title,
+            content=content,
+            image_paths=args.images,
+        )
+        _output(
+            {
+                "success": True,
+                "templates": template_names,
+                "status": "长文已填写，请选择模板",
+            }
+        )
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
+def cmd_select_template(args: argparse.Namespace) -> None:
+    """选择排版模板。"""
+    from xhs.publish_long_article import select_template
+
+    browser, page = _connect(args)
+    try:
+        selected = select_template(page, args.name)
+        if selected:
+            _output({"success": True, "template": args.name, "status": "模板已选择"})
+        else:
+            _output(
+                {"success": False, "error": f"未找到模板: {args.name}"},
+                exit_code=2,
+            )
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
+def cmd_next_step(args: argparse.Namespace) -> None:
+    """点击下一步 + 填写发布页描述。"""
+    from xhs.publish_long_article import click_next_and_fill_description
+
+    with open(args.content_file, encoding="utf-8") as f:
+        description = f.read().strip()
+
+    browser, page = _connect(args)
+    try:
+        click_next_and_fill_description(page, description)
+        _output({"success": True, "status": "已进入发布页，等待确认发布"})
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
 def cmd_publish_video(args: argparse.Namespace) -> None:
     """发布视频内容。"""
+    from xhs.login import check_login_status
     from xhs.publish_video import publish_video_content
     from xhs.types import PublishVideoContent
 
@@ -280,6 +462,14 @@ def cmd_publish_video(args: argparse.Namespace) -> None:
 
     browser, page = _connect(args)
     try:
+        # headless 模式登录检查 + 自动降级
+        headless = getattr(args, "headless", False)
+        if headless and not check_login_status(page):
+            browser.close_page(page)
+            browser.close()
+            _headless_fallback(args.port)
+            return
+
         publish_video_content(
             page,
             PublishVideoContent(
@@ -396,6 +586,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
     sub.add_argument("--original", action="store_true", help="声明原创")
     sub.add_argument("--visibility", help="可见范围")
+    sub.add_argument("--headless", action="store_true", help="无头模式（未登录自动降级）")
     sub.set_defaults(func=cmd_publish)
 
     # publish-video
@@ -406,7 +597,50 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--tags", nargs="*", help="标签")
     sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
     sub.add_argument("--visibility", help="可见范围")
+    sub.add_argument("--headless", action="store_true", help="无头模式（未登录自动降级）")
     sub.set_defaults(func=cmd_publish_video)
+
+    # fill-publish（只填写图文表单，不发布）
+    sub = subparsers.add_parser("fill-publish", help="填写图文表单（不发布）")
+    sub.add_argument("--title-file", required=True, help="标题文件路径")
+    sub.add_argument("--content-file", required=True, help="正文文件路径")
+    sub.add_argument("--images", nargs="+", required=True, help="图片路径/URL")
+    sub.add_argument("--tags", nargs="*", help="标签")
+    sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
+    sub.add_argument("--original", action="store_true", help="声明原创")
+    sub.add_argument("--visibility", help="可见范围")
+    sub.set_defaults(func=cmd_fill_publish)
+
+    # fill-publish-video（只填写视频表单，不发布）
+    sub = subparsers.add_parser("fill-publish-video", help="填写视频表单（不发布）")
+    sub.add_argument("--title-file", required=True, help="标题文件路径")
+    sub.add_argument("--content-file", required=True, help="正文文件路径")
+    sub.add_argument("--video", required=True, help="视频文件路径")
+    sub.add_argument("--tags", nargs="*", help="标签")
+    sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
+    sub.add_argument("--visibility", help="可见范围")
+    sub.set_defaults(func=cmd_fill_publish_video)
+
+    # click-publish（点击发布按钮）
+    sub = subparsers.add_parser("click-publish", help="点击发布按钮")
+    sub.set_defaults(func=cmd_click_publish)
+
+    # long-article（长文模式）
+    sub = subparsers.add_parser("long-article", help="长文模式：填写 + 一键排版")
+    sub.add_argument("--title-file", required=True, help="标题文件路径")
+    sub.add_argument("--content-file", required=True, help="正文文件路径")
+    sub.add_argument("--images", nargs="*", help="可选图片路径")
+    sub.set_defaults(func=cmd_long_article)
+
+    # select-template（选择模板）
+    sub = subparsers.add_parser("select-template", help="选择排版模板")
+    sub.add_argument("--name", required=True, help="模板名称")
+    sub.set_defaults(func=cmd_select_template)
+
+    # next-step（下一步 + 填写描述）
+    sub = subparsers.add_parser("next-step", help="点击下一步 + 填写描述")
+    sub.add_argument("--content-file", required=True, help="描述内容文件路径")
+    sub.set_defaults(func=cmd_next_step)
 
     return parser
 

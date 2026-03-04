@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
@@ -137,6 +138,85 @@ def is_chrome_running(port: int = DEFAULT_PORT) -> bool:
         return resp.status_code == 200
     except (requests.ConnectionError, requests.Timeout):
         return False
+
+
+def kill_chrome(port: int = DEFAULT_PORT) -> None:
+    """关闭指定端口的 Chrome 实例。
+
+    尝试通过 CDP Browser.close 命令关闭，失败则使用进程信号。
+
+    Args:
+        port: Chrome 调试端口。
+    """
+    import requests
+
+    # 策略1: 通过 CDP 关闭
+    try:
+        resp = requests.get(f"http://127.0.0.1:{port}/json/version", timeout=2)
+        if resp.status_code == 200:
+            ws_url = resp.json().get("webSocketDebuggerUrl")
+            if ws_url:
+                import websockets.sync.client
+
+                ws = websockets.sync.client.connect(ws_url)
+                ws.send(json.dumps({"id": 1, "method": "Browser.close"}))
+                ws.close()
+                logger.info("通过 CDP Browser.close 关闭 Chrome (port=%d)", port)
+                time.sleep(1)
+                return
+    except Exception:
+        pass
+
+    # 策略2: 通过 lsof 查找并 kill 进程
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            import contextlib
+
+            pids = result.stdout.strip().split("\n")
+            for pid in pids:
+                with contextlib.suppress(OSError, ValueError):
+                    os.kill(int(pid), signal.SIGTERM)
+            logger.info("通过 SIGTERM 关闭 Chrome 进程 (port=%d)", port)
+            time.sleep(1)
+            return
+    except Exception:
+        pass
+
+    logger.warning("未能关闭 Chrome (port=%d)", port)
+
+
+def restart_chrome(
+    port: int = DEFAULT_PORT,
+    headless: bool = False,
+    user_data_dir: str | None = None,
+    chrome_bin: str | None = None,
+) -> subprocess.Popen:
+    """重启 Chrome：关闭当前实例后以新模式重新启动。
+
+    Args:
+        port: 远程调试端口。
+        headless: 是否无头模式。
+        user_data_dir: 用户数据目录。
+        chrome_bin: Chrome 可执行文件路径。
+
+    Returns:
+        新的 Chrome 子进程。
+    """
+    logger.info("重启 Chrome: port=%d, headless=%s", port, headless)
+    kill_chrome(port)
+    time.sleep(1)
+    return launch_chrome(
+        port=port,
+        headless=headless,
+        user_data_dir=user_data_dir,
+        chrome_bin=chrome_bin,
+    )
 
 
 def _wait_for_chrome(port: int, timeout: float = 15.0) -> None:
