@@ -3,6 +3,17 @@ name: xhs-auth
 description: |
   小红书认证管理技能。检查登录状态、登录（二维码或手机号）、多账号管理。
   当用户要求登录小红书、检查登录状态、切换账号时触发。
+version: 1.0.0
+metadata:
+  openclaw:
+    requires:
+      bins:
+        - python3
+        - uv
+    emoji: "\U0001F510"
+    os:
+      - macos
+      - linux
 ---
 
 # 小红书认证管理

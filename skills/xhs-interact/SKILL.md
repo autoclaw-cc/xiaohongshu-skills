@@ -3,6 +3,17 @@ name: xhs-interact
 description: |
   小红书社交互动技能。发表评论、回复评论、点赞、收藏。
   当用户要求评论、回复、点赞或收藏小红书帖子时触发。
+version: 1.0.0
+metadata:
+  openclaw:
+    requires:
+      bins:
+        - python3
+        - uv
+    emoji: "\U0001F4AC"
+    os:
+      - macos
+      - linux
 ---
 
 # 小红书社交互动

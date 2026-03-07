@@ -3,6 +3,17 @@ name: xhs-publish
 description: |
   小红书内容发布技能。支持图文发布、视频发布、长文发布、定时发布、标签、可见性设置。
   当用户要求发布内容到小红书、上传图文、上传视频、发长文时触发。
+version: 1.0.0
+metadata:
+  openclaw:
+    requires:
+      bins:
+        - python3
+        - uv
+    emoji: "\U0001F4DD"
+    os:
+      - macos
+      - linux
 ---
 
 # 小红书内容发布
