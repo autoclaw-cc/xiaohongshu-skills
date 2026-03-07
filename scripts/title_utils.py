@@ -5,6 +5,23 @@ from __future__ import annotations
 MAX_TITLE_LENGTH = 20
 
 
+def truncate_title(s: str, max_length: int = MAX_TITLE_LENGTH) -> str:
+    """将标题裁剪到 max_length 以内（逐字符从末尾去除）。
+
+    Args:
+        s: 原始标题。
+        max_length: 最大允许长度（默认 20）。
+
+    Returns:
+        满足长度要求的标题字符串。
+    """
+    if calc_title_length(s) <= max_length:
+        return s
+    while s and calc_title_length(s) > max_length:
+        s = s[:-1]
+    return s
+
+
 def calc_title_length(s: str) -> int:
     """计算小红书标题长度。
 

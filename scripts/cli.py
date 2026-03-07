@@ -18,6 +18,9 @@ import tempfile
 # 记录登录用 tab 的 target_id，确保 verify-code / wait-login 连回精确的那个 tab
 _LOGIN_TAB_FILE = os.path.join(tempfile.gettempdir(), "xhs", "login_tab_id.txt")
 
+# 记录上次命令使用的 tab，供下次命令复用，避免重复开新 tab
+_SESSION_TAB_FILE = os.path.join(tempfile.gettempdir(), "xhs", "session_tab_id.txt")
+
 
 def _save_login_tab(target_id: str) -> None:
     os.makedirs(os.path.dirname(_LOGIN_TAB_FILE), exist_ok=True)
@@ -35,6 +38,24 @@ def _load_login_tab() -> str | None:
 def _clear_login_tab() -> None:
     with contextlib.suppress(FileNotFoundError):
         os.remove(_LOGIN_TAB_FILE)
+
+
+def _save_session_tab(target_id: str) -> None:
+    os.makedirs(os.path.dirname(_SESSION_TAB_FILE), exist_ok=True)
+    with open(_SESSION_TAB_FILE, "w") as f:
+        f.write(target_id)
+
+
+def _load_session_tab() -> str | None:
+    with contextlib.suppress(FileNotFoundError):
+        data = open(_SESSION_TAB_FILE).read().strip()
+        return data or None
+    return None
+
+
+def _clear_session_tab() -> None:
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(_SESSION_TAB_FILE)
 
 # Windows 控制台默认编码（如 cp1252）不支持中文，强制 UTF-8
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -56,7 +77,11 @@ def _output(data: dict, exit_code: int = 0) -> None:
 
 
 def _connect(args: argparse.Namespace):
-    """连接到 Chrome 并返回 (browser, page)。"""
+    """连接到 Chrome 并返回 (browser, page)。
+
+    优先复用上次命令留下的 tab（通过 _SESSION_TAB_FILE 记录），
+    避免每次命令都新建 tab 导致 Chrome 中 tab 堆积。
+    """
     from chrome_launcher import ensure_chrome, has_display
     from xhs.cdp import Browser
 
@@ -68,7 +93,19 @@ def _connect(args: argparse.Namespace):
 
     browser = Browser(host=args.host, port=args.port)
     browser.connect()
-    page = browser.new_page()
+
+    # 优先复用上次命令留下的 tab
+    saved_id = _load_session_tab()
+    if saved_id:
+        page = browser.get_page_by_target_id(saved_id)
+        if page:
+            logger.debug("复用会话 tab: %s", saved_id)
+            _save_session_tab(page.target_id)
+            return browser, page
+        logger.warning("会话 tab (target_id=%s) 已失效，重新获取", saved_id)
+
+    page = browser.get_or_create_page()
+    _save_session_tab(page.target_id)
     return browser, page
 
 
@@ -184,7 +221,7 @@ def cmd_check_login(args: argparse.Namespace) -> None:
                     ),
                 }, exit_code=1)
     finally:
-        browser.close_page(page)
+        # 不关闭 tab，保留页面供下次命令复用（_SESSION_TAB_FILE）
         browser.close()
 
 
@@ -388,6 +425,7 @@ def cmd_delete_cookies(args: argparse.Namespace) -> None:
     path = get_cookies_file_path(args.account)
     delete_cookies(path)
 
+    _clear_session_tab()  # 退出登录后清除会话 tab 记录
     msg = "已退出登录并删除 cookies" if logged_out else "未登录，已删除 cookies 文件"
     _output({"success": True, "message": msg, "cookies_path": path})
 

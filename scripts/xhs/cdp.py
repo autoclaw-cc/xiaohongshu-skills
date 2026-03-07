@@ -534,35 +534,12 @@ class Browser:
         logger.info("连接到 Chrome: %s", ws_url)
         self._cdp = CDPClient(ws_url)
 
-    def new_page(self, url: str = "about:blank") -> Page:
-        """创建新页面。"""
-        if not self._cdp:
-            self.connect()
-        assert self._cdp is not None
+    def _setup_page(self, page: Page) -> Page:
+        """为 Page 对象注入 stealth、UA、viewport，并启用必要的 CDP domain。"""
+        import contextlib
 
-        # 创建 target
-        result = self._cdp.send("Target.createTarget", {"url": url})
-        target_id = result["targetId"]
-
-        # 附加到 target
-        result = self._cdp.send(
-            "Target.attachToTarget",
-            {"targetId": target_id, "flatten": True},
-        )
-        session_id = result["sessionId"]
-
-        page = Page(self._cdp, target_id, session_id)
-
-        # 注入反检测（必须在 enable domains 之前）
         page.inject_stealth()
-
-        # UA 覆盖
-        page._send_session(
-            "Emulation.setUserAgentOverride",
-            {"userAgent": REALISTIC_UA},
-        )
-
-        # 随机 viewport（模拟真实屏幕尺寸）
+        page._send_session("Emulation.setUserAgentOverride", {"userAgent": REALISTIC_UA})
         page._send_session(
             "Emulation.setDeviceMetricsOverride",
             {
@@ -572,23 +549,66 @@ class Browser:
                 "mobile": False,
             },
         )
-
-        # 拒绝权限弹窗（位置、通知等）
-        import contextlib
-
         for perm in ("geolocation", "notifications", "midi", "camera", "microphone"):
             with contextlib.suppress(CDPError):
+                assert self._cdp is not None
                 self._cdp.send(
                     "Browser.setPermission",
                     {"permission": {"name": perm}, "setting": "denied"},
                 )
-
-        # 启用必要的 domain
         page._send_session("Page.enable")
         page._send_session("DOM.enable")
         page._send_session("Runtime.enable")
-
         return page
+
+    def new_page(self, url: str = "about:blank") -> Page:
+        """创建新页面（强制开新 tab）。"""
+        if not self._cdp:
+            self.connect()
+        assert self._cdp is not None
+
+        result = self._cdp.send("Target.createTarget", {"url": url})
+        target_id = result["targetId"]
+        result = self._cdp.send(
+            "Target.attachToTarget",
+            {"targetId": target_id, "flatten": True},
+        )
+        session_id = result["sessionId"]
+        return self._setup_page(Page(self._cdp, target_id, session_id))
+
+    def get_or_create_page(self) -> Page:
+        """复用现有空白 tab，找不到时才新建。
+
+        避免每次命令都创建新 tab 导致 Chrome 中 tab 无限堆积。
+        空白 tab 判定：url 为 about:blank 或 chrome://newtab/。
+        """
+        if not self._cdp:
+            self.connect()
+        assert self._cdp is not None
+
+        import contextlib
+
+        resp = requests.get(f"{self.base_url}/json", timeout=5)
+        targets = resp.json()
+
+        for target in targets:
+            if target.get("type") == "page" and target.get("url") in (
+                "about:blank",
+                "chrome://newtab/",
+            ):
+                target_id = target["id"]
+                with contextlib.suppress(Exception):
+                    result = self._cdp.send(
+                        "Target.attachToTarget",
+                        {"targetId": target_id, "flatten": True},
+                    )
+                    session_id = result.get("sessionId")
+                    if session_id:
+                        logger.debug("复用空白 tab: %s", target_id)
+                        return self._setup_page(Page(self._cdp, target_id, session_id))
+
+        # 没有空白 tab，新建一个
+        return self.new_page()
 
     def get_page_by_target_id(self, target_id: str) -> Page | None:
         """通过 target_id 精确连接到指定 tab。"""
