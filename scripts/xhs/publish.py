@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 import random
 import re
 import time
@@ -322,7 +323,7 @@ def _fill_publish_form(
     content, tags = _extract_hashtags_from_content(content, tags)
 
     # 标题——填写前先校验长度，超限直接报错（由 AI 重新生成标题）
-    from title_utils import calc_title_length
+    from title_utils import calc_title_length  # type: ignore[attr-defined]
 
     title_len = calc_title_length(title)
     if title_len > 20:
@@ -432,10 +433,8 @@ def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
     page.click_element(content_selector)
     time.sleep(0.3)
 
-    # 移动光标到正文末尾（20次 ArrowDown）
-    for _ in range(20):
-        page.press_key("ArrowDown")
-        time.sleep(0.01)
+    # 移动光标到正文末尾
+    _move_cursor_to_end(page, content_selector)
 
     # 按两次回车换行
     page.press_key("Enter")
@@ -445,6 +444,40 @@ def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
     for tag in tags:
         tag = tag.lstrip("#")
         _input_single_tag(page, content_selector, tag)
+
+
+def _move_cursor_to_end(page: Page, content_selector: str) -> None:
+    """通过 JavaScript 将光标移动到 contenteditable 元素末尾。"""
+    page.evaluate(
+        f"""
+        (() => {{
+            const el = document.querySelector({json.dumps(content_selector)});
+            if (!el) return false;
+
+            // 将焦点设置到元素
+            el.focus();
+
+            // 获取 Selection 和 Range
+            const sel = window.getSelection();
+            const range = sel.rangeCount > 0 ? sel.getRangeAt(0) : document.createRange();
+
+            // 如果元素有子节点，选择最后一个节点的末尾
+            if (el.lastChild) {{
+                range.setStartAfter(el.lastChild);
+                range.collapse(true);
+            }} else {{
+                // 空元素，直接设置
+                range.selectNodeContents(el);
+                range.collapse(false);
+            }}
+
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return true;
+        }})()
+        """
+    )
+    time.sleep(0.3)
 
 
 def _input_single_tag(page: Page, content_selector: str, tag: str) -> None:
