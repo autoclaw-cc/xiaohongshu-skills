@@ -15,7 +15,7 @@ import requests
 import websockets.sync.client as ws_client
 
 from .errors import CDPError, ElementNotFoundError
-from .stealth import REALISTIC_UA, STEALTH_JS
+from .stealth import STEALTH_JS, build_ua_override
 
 logger = logging.getLogger(__name__)
 
@@ -571,6 +571,7 @@ class Browser:
         self.port = port
         self.base_url = f"http://{host}:{port}"
         self._cdp: CDPClient | None = None
+        self._chrome_version: str | None = None
 
     def connect(self) -> None:
         """连接到 Chrome DevTools。"""
@@ -578,7 +579,13 @@ class Browser:
         resp.raise_for_status()
         info = resp.json()
         ws_url = info["webSocketDebuggerUrl"]
-        logger.info("连接到 Chrome: %s", ws_url)
+
+        # 从 "Chrome/134.0.6998.88" 提取真实版本号，用于动态构建 UA
+        browser_str = info.get("Browser", "")
+        if "/" in browser_str:
+            self._chrome_version = browser_str.split("/", 1)[1]
+
+        logger.info("连接到 Chrome: %s (version=%s)", ws_url, self._chrome_version)
         self._cdp = CDPClient(ws_url)
 
     def _setup_page(self, page: Page) -> Page:
@@ -586,7 +593,10 @@ class Browser:
         import contextlib
 
         page.inject_stealth()
-        page._send_session("Emulation.setUserAgentOverride", {"userAgent": REALISTIC_UA})
+        page._send_session(
+            "Emulation.setUserAgentOverride",
+            build_ua_override(self._chrome_version),
+        )
         page._send_session(
             "Emulation.setDeviceMetricsOverride",
             {
