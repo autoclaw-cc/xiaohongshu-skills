@@ -1,8 +1,24 @@
 # xiaohongshu-skills
 
+[中文](#中文) | [English](#english)
+
+---
+
+## 中文
 小红书自动化 Skills，基于 Python CDP 浏览器自动化引擎。
 
 支持 [OpenClaw](https://github.com/anthropics/openclaw) 及所有兼容 `SKILL.md` 格式的 AI Agent 平台（如 Claude Code）。
+
+---
+
+## English
+Xiaohongshu (Little Red Book) automation skills, based on Python CDP browser automation engine.
+
+Supports [OpenClaw](https://github.com/anthropics/openclaw) and all AI Agent platforms compatible with the `SKILL.md` format (e.g., Claude Code).
+
+This library provides a complete set of automation capabilities for Xiaohongshu, including authentication, content publishing, data scraping, and social interaction.
+
+📖 See the [Installation](#安装) section below for setup instructions, and check out the [Skills](#功能概览) documentation for usage examples.
 
 ## 功能概览
 
