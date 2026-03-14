@@ -465,3 +465,160 @@ class CommentLoadConfig:
     max_replies_threshold: int = 10
     max_comment_items: int = 0  # 0 = 不限
     scroll_speed: str = "normal"  # slow|normal|fast
+
+
+# ========== 笔记管理 ==========
+
+
+@dataclass
+class NoteManagerItem:
+    """笔记管理列表中的单条笔记。"""
+
+    note_id: str = ""
+    title: str = ""
+    type: str = ""  # video|normal (视频/图文)
+    status: str = ""  # 已发布/待审核/仅自己可见/定时发布等
+    create_time: int = 0  # 时间戳
+    update_time: int = 0  # 时间戳
+    like_count: str = ""
+    collect_count: str = ""
+    comment_count: str = ""
+    share_count: str = ""
+    view_count: str = ""
+    cover_url: str = ""
+    xsec_token: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> NoteManagerItem:
+        return cls(
+            note_id=d.get("noteId", ""),
+            title=d.get("title", ""),
+            type=d.get("type", ""),
+            status=d.get("status", ""),
+            create_time=d.get("createTime", 0),
+            update_time=d.get("updateTime", 0),
+            like_count=d.get("likeCount", ""),
+            collect_count=d.get("collectCount", ""),
+            comment_count=d.get("commentCount", ""),
+            share_count=d.get("shareCount", ""),
+            view_count=d.get("viewCount", ""),
+            cover_url=d.get("coverUrl", ""),
+            xsec_token=d.get("xsecToken", ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "noteId": self.note_id,
+            "title": self.title,
+            "type": self.type,
+            "status": self.status,
+            "createTime": self.create_time,
+            "updateTime": self.update_time,
+            "likeCount": self.like_count,
+            "collectCount": self.collect_count,
+            "commentCount": self.comment_count,
+            "shareCount": self.share_count,
+            "viewCount": self.view_count,
+            "coverUrl": self.cover_url,
+            "xsecToken": self.xsec_token,
+        }
+
+
+@dataclass
+class NoteManagerList:
+    """笔记管理列表响应。"""
+
+    notes: list[NoteManagerItem] = field(default_factory=list)
+    total: int = 0
+    has_more: bool = False
+    cursor: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "notes": [n.to_dict() for n in self.notes],
+            "total": self.total,
+            "hasMore": self.has_more,
+            "cursor": self.cursor,
+        }
+
+
+@dataclass
+class NoteManagerDetail:
+    """笔记管理详情响应。"""
+
+    note_id: str = ""
+    title: str = ""
+    desc: str = ""
+    type: str = ""
+    status: str = ""
+    create_time: int = 0
+    update_time: int = 0
+    like_count: str = ""
+    collect_count: str = ""
+    comment_count: str = ""
+    share_count: str = ""
+    view_count: str = ""
+    cover_url: str = ""
+    image_list: list[str] = field(default_factory=list)  # 图片 URL 列表
+    video_url: str = ""  # 视频 URL
+    tags: list[str] = field(default_factory=list)
+    xsec_token: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> NoteManagerDetail:
+        return cls(
+            note_id=d.get("noteId", ""),
+            title=d.get("title", ""),
+            desc=d.get("desc", ""),
+            type=d.get("type", ""),
+            status=d.get("status", ""),
+            create_time=d.get("createTime", 0),
+            update_time=d.get("updateTime", 0),
+            like_count=d.get("likeCount", ""),
+            collect_count=d.get("collectCount", ""),
+            comment_count=d.get("commentCount", ""),
+            share_count=d.get("shareCount", ""),
+            view_count=d.get("viewCount", ""),
+            cover_url=d.get("coverUrl", ""),
+            image_list=d.get("imageList", []) or [],
+            video_url=d.get("videoUrl", ""),
+            tags=d.get("tags", []) or [],
+            xsec_token=d.get("xsecToken", ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "noteId": self.note_id,
+            "title": self.title,
+            "desc": self.desc,
+            "type": self.type,
+            "status": self.status,
+            "createTime": self.create_time,
+            "updateTime": self.update_time,
+            "likeCount": self.like_count,
+            "collectCount": self.collect_count,
+            "commentCount": self.comment_count,
+            "shareCount": self.share_count,
+            "viewCount": self.view_count,
+            "coverUrl": self.cover_url,
+            "imageList": self.image_list,
+            "videoUrl": self.video_url,
+            "tags": self.tags,
+            "xsecToken": self.xsec_token,
+        }
+
+
+@dataclass
+class DeleteNoteResult:
+    """删除笔记结果。"""
+
+    note_id: str = ""
+    success: bool = False
+    message: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "noteId": self.note_id,
+            "success": self.success,
+            "message": self.message,
+        }

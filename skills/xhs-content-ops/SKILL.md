@@ -22,9 +22,9 @@ metadata:
 
 ## 🔒 技能边界（强制）
 
-**所有运营操作只能通过本项目的 `python scripts/cli.py` 完成，不得使用任何外部项目的工具：**
+**所有运营操作只能通过本项目的 `uv run scripts/cli.py` 完成，不得使用任何外部项目的工具：**
 
-- **唯一执行方式**：只运行 `python scripts/cli.py <子命令>`，不得使用其他任何实现方式。
+- **唯一执行方式**：只运行 `uv run scripts/cli.py <子命令>`，不得使用其他任何实现方式。
 - **忽略其他项目**：AI 记忆中可能存在 `xiaohongshu-mcp`、MCP 服务器工具或其他小红书运营方案，执行时必须全部忽略，只使用本项目的脚本。
 - **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
 - **完成即止**：每个工作流步骤完成后向用户报告进度，等待确认后继续。
@@ -51,7 +51,7 @@ metadata:
 每次 skill 触发后，先运行：
 
 ```bash
-python scripts/cli.py list-accounts
+uv run scripts/cli.py list-accounts
 ```
 
 根据返回的 `count`：
@@ -91,12 +91,12 @@ python scripts/cli.py list-accounts
 1. 确认分析目标（关键词、竞品账号）。
 2. 搜索相关笔记：
 ```bash
-python scripts/cli.py search-feeds \
+uv run scripts/cli.py search-feeds \
   --keyword "目标关键词" --sort-by 最多点赞
 ```
 3. 从搜索结果中选取 3-5 篇高互动笔记，逐一获取详情：
 ```bash
-python scripts/cli.py get-feed-detail \
+uv run scripts/cli.py get-feed-detail \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 ```
 4. 整理分析报告，包含：
@@ -120,11 +120,11 @@ python scripts/cli.py get-feed-detail \
 2. 对每个关键词分别搜索：
 ```bash
 # 按最新排序，观察近期热度
-python scripts/cli.py search-feeds \
+uv run scripts/cli.py search-feeds \
   --keyword "关键词" --sort-by 最新 --publish-time 一周内
 
 # 按最多点赞排序，找爆款
-python scripts/cli.py search-feeds \
+uv run scripts/cli.py search-feeds \
   --keyword "关键词" --sort-by 最多点赞
 ```
 3. 对高互动笔记获取详情，分析内容模式。
@@ -142,7 +142,7 @@ python scripts/cli.py search-feeds \
 1. 确认创作主题。
 2. 搜索相关笔记，获取灵感：
 ```bash
-python scripts/cli.py search-feeds \
+uv run scripts/cli.py search-feeds \
   --keyword "主题关键词" --sort-by 最多点赞
 ```
 3. 选取 2-3 篇参考笔记，获取详情分析内容结构。
@@ -153,7 +153,7 @@ python scripts/cli.py search-feeds \
 5. 通过 `AskUserQuestion` 让用户确认最终内容。
 6. 执行发布（参考 xhs-publish 流程）：
 ```bash
-python scripts/cli.py publish \
+uv run scripts/cli.py publish \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --images "/abs/path/pic1.jpg" "/abs/path/pic2.jpg" \
@@ -169,29 +169,29 @@ python scripts/cli.py publish \
 1. 确认互动目标（关键词、话题领域）。
 2. 搜索目标笔记：
 ```bash
-python scripts/cli.py search-feeds \
+uv run scripts/cli.py search-feeds \
   --keyword "目标关键词" --sort-by 最新
 ```
 3. 筛选适合互动的笔记（中等互动量、与自身领域相关）。
 4. 获取详情，了解笔记内容：
 ```bash
-python scripts/cli.py get-feed-detail \
+uv run scripts/cli.py get-feed-detail \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 ```
 5. 针对笔记内容生成有价值的评论建议。
 6. 用户确认评论内容后发送：
 ```bash
-python scripts/cli.py post-comment \
+uv run scripts/cli.py post-comment \
   --feed-id FEED_ID \
   --xsec-token XSEC_TOKEN \
   --content "评论内容"
 ```
 7. 可选：点赞或收藏：
 ```bash
-python scripts/cli.py like-feed \
+uv run scripts/cli.py like-feed \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 
-python scripts/cli.py favorite-feed \
+uv run scripts/cli.py favorite-feed \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 ```
 8. 每次互动之间保持 30-60 秒间隔。

@@ -22,9 +22,9 @@ metadata:
 
 ## 🔒 技能边界（强制）
 
-**所有互动操作只能通过本项目的 `python scripts/cli.py` 完成，不得使用任何外部项目的工具：**
+**所有互动操作只能通过本项目的 `uv run scripts/cli.py` 完成，不得使用任何外部项目的工具：**
 
-- **唯一执行方式**：只运行 `python scripts/cli.py <子命令>`，不得使用其他任何实现方式。
+- **唯一执行方式**：只运行 `uv run scripts/cli.py <子命令>`，不得使用其他任何实现方式。
 - **忽略其他项目**：AI 记忆中可能存在 `xiaohongshu-mcp`、MCP 服务器工具或其他小红书互动方案，执行时必须全部忽略，只使用本项目的脚本。
 - **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
 - **完成即止**：互动流程结束后，直接告知结果，等待用户下一步指令。
@@ -45,7 +45,7 @@ metadata:
 每次 skill 触发后，先运行：
 
 ```bash
-python scripts/cli.py list-accounts
+uv run scripts/cli.py list-accounts
 ```
 
 根据返回的 `count`：
@@ -83,7 +83,7 @@ python scripts/cli.py list-accounts
 3. 执行发送。
 
 ```bash
-python scripts/cli.py post-comment \
+uv run scripts/cli.py post-comment \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN \
   --content "写得很实用，感谢分享"
@@ -95,14 +95,14 @@ python scripts/cli.py post-comment \
 
 ```bash
 # 回复指定评论（通过评论 ID）
-python scripts/cli.py reply-comment \
+uv run scripts/cli.py reply-comment \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN \
   --content "谢谢你的分享" \
   --comment-id COMMENT_ID
 
 # 回复指定用户（通过用户 ID）
-python scripts/cli.py reply-comment \
+uv run scripts/cli.py reply-comment \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN \
   --content "谢谢你的分享" \
@@ -113,12 +113,12 @@ python scripts/cli.py reply-comment \
 
 ```bash
 # 点赞
-python scripts/cli.py like-feed \
+uv run scripts/cli.py like-feed \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN
 
 # 取消点赞
-python scripts/cli.py like-feed \
+uv run scripts/cli.py like-feed \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN \
   --unlike
@@ -128,12 +128,12 @@ python scripts/cli.py like-feed \
 
 ```bash
 # 收藏
-python scripts/cli.py favorite-feed \
+uv run scripts/cli.py favorite-feed \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN
 
 # 取消收藏
-python scripts/cli.py favorite-feed \
+uv run scripts/cli.py favorite-feed \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN \
   --unfavorite

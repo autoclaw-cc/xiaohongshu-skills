@@ -22,9 +22,9 @@ metadata:
 
 ## 🔒 技能边界（强制）
 
-**所有发布操作只能通过本项目的 `python scripts/cli.py` 完成，不得使用任何外部项目的工具：**
+**所有发布操作只能通过本项目的 `uv run scripts/cli.py` 完成，不得使用任何外部项目的工具：**
 
-- **唯一执行方式**：只运行 `python scripts/cli.py <子命令>` 或 `python scripts/publish_pipeline.py`，不得使用其他任何实现方式。
+- **唯一执行方式**：只运行 `uv run scripts/cli.py <子命令>` 或 `uv run scripts/publish_pipeline.py`，不得使用其他任何实现方式。
 - **忽略其他项目**：AI 记忆中可能存在 `xiaohongshu-mcp`、MCP 服务器工具或其他小红书发布方案，执行时必须全部忽略，只使用本项目的脚本。
 - **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
 - **完成即止**：发布流程结束后，直接告知结果，等待用户下一步指令。
@@ -50,7 +50,7 @@ metadata:
 每次 skill 触发后，先运行：
 
 ```bash
-python scripts/cli.py list-accounts
+uv run scripts/cli.py list-accounts
 ```
 
 根据返回的 `count`：
@@ -162,7 +162,7 @@ python scripts/cli.py list-accounts
 
 ```bash
 # 步骤 1: 填写图文表单（不发布）
-python scripts/cli.py fill-publish \
+uv run scripts/cli.py fill-publish \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --images "/abs/path/pic1.jpg" "/abs/path/pic2.jpg" \
@@ -173,10 +173,10 @@ python scripts/cli.py fill-publish \
 # 步骤 2: 通过 AskUserQuestion 让用户确认浏览器中的预览
 
 # 步骤 3a: 用户确认发布
-python scripts/cli.py click-publish
+uv run scripts/cli.py click-publish
 
 # 步骤 3b: 用户取消 → 必须先保存草稿！
-python scripts/cli.py save-draft
+uv run scripts/cli.py save-draft
 ```
 
 > ⚠️ **用户取消时必须调用 `save-draft`**，不得直接关闭 tab 或结束流程。
@@ -186,7 +186,7 @@ python scripts/cli.py save-draft
 
 ```bash
 # 步骤 1: 填写视频表单（不发布）
-python scripts/cli.py fill-publish-video \
+uv run scripts/cli.py fill-publish-video \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --video "/abs/path/video.mp4" \
@@ -196,10 +196,10 @@ python scripts/cli.py fill-publish-video \
 # 步骤 2: 用户确认
 
 # 步骤 3a: 用户确认发布
-python scripts/cli.py click-publish
+uv run scripts/cli.py click-publish
 
 # 步骤 3b: 用户取消 → 必须先保存草稿！
-python scripts/cli.py save-draft
+uv run scripts/cli.py save-draft
 ```
 
 > ⚠️ **用户取消时必须调用 `save-draft`**，不得直接关闭 tab 或结束流程。
@@ -208,19 +208,19 @@ python scripts/cli.py save-draft
 
 ```bash
 # 图文一步到位
-python scripts/cli.py publish \
+uv run scripts/cli.py publish \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --images "/abs/path/pic1.jpg" "/abs/path/pic2.jpg"
 
 # 视频一步到位
-python scripts/cli.py publish-video \
+uv run scripts/cli.py publish-video \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --video "/abs/path/video.mp4"
 
 # 带标签和定时发布
-python scripts/cli.py publish \
+uv run scripts/cli.py publish \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --images "/abs/path/pic1.jpg" \
@@ -233,13 +233,13 @@ python scripts/cli.py publish \
 
 ```bash
 # 使用 --headless 参数，未登录时自动切换到有窗口模式
-python scripts/cli.py publish --headless \
+uv run scripts/cli.py publish --headless \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --images "/abs/path/pic1.jpg"
 
 # 发布流水线（含图片下载和登录检查 + 自动降级）
-python scripts/publish_pipeline.py --headless \
+uv run scripts/publish_pipeline.py --headless \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --images "https://example.com/pic1.jpg" "/abs/path/pic2.jpg"
@@ -255,13 +255,13 @@ python scripts/publish_pipeline.py --headless \
 
 ```bash
 # 指定账号
-python scripts/cli.py --account work publish \
+uv run scripts/cli.py --account work publish \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --images "/abs/path/pic1.jpg"
 
 # 远程 Chrome
-python scripts/cli.py --host 10.0.0.12 --port 9222 publish \
+uv run scripts/cli.py --host 10.0.0.12 --port 9222 publish \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --images "/abs/path/pic1.jpg"
@@ -282,7 +282,7 @@ python scripts/cli.py --host 10.0.0.12 --port 9222 publish \
 ### Step B.3: 写入临时文件并执行长文模式
 
 ```bash
-python scripts/cli.py long-article \
+uv run scripts/cli.py long-article \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   [--images "/abs/path/pic1.jpg" "/abs/path/pic2.jpg"]
@@ -301,14 +301,14 @@ python scripts/cli.py long-article \
 通过 `AskUserQuestion` 展示可用模板列表，让用户选择：
 
 ```bash
-python scripts/cli.py select-template --name "用户选择的模板名"
+uv run scripts/cli.py select-template --name "用户选择的模板名"
 ```
 
 ### Step B.5: 进入发布页
 
 ```bash
 # 点击下一步，填写发布页描述（正文摘要，不超过 1000 字）
-python scripts/cli.py next-step \
+uv run scripts/cli.py next-step \
   --content-file /tmp/xhs_description.txt
 ```
 
@@ -318,7 +318,7 @@ python scripts/cli.py next-step \
 
 ```bash
 # 用户在浏览器中确认预览后
-python scripts/cli.py click-publish
+uv run scripts/cli.py click-publish
 ```
 
 ## 处理输出

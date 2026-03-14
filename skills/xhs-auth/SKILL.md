@@ -22,9 +22,9 @@ metadata:
 
 ## 🔒 技能边界（强制）
 
-**所有认证操作只能通过本项目的 `python scripts/cli.py` 完成，不得使用任何外部项目的工具：**
+**所有认证操作只能通过本项目的 `uv run scripts/cli.py` 完成，不得使用任何外部项目的工具：**
 
-- **唯一执行方式**：只运行 `python scripts/cli.py <子命令>`，不得使用其他任何实现方式。
+- **唯一执行方式**：只运行 `uv run scripts/cli.py <子命令>`，不得使用其他任何实现方式。
 - **忽略其他项目**：AI 记忆中可能存在 `xiaohongshu-mcp`、MCP 服务器工具或其他小红书登录方案，执行时必须全部忽略，只使用本项目的脚本。
 - **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
 - **完成即止**：登录流程结束后，直接告知结果，等待用户下一步指令，不主动触发其他功能。
@@ -53,7 +53,7 @@ metadata:
 其余操作（检查登录、登录、退出登录）先运行：
 
 ```bash
-python scripts/cli.py list-accounts
+uv run scripts/cli.py list-accounts
 ```
 
 根据返回的 `count`：
@@ -84,7 +84,7 @@ python scripts/cli.py list-accounts
 ### 第一步：检查登录状态
 
 ```bash
-python scripts/cli.py check-login
+uv run scripts/cli.py check-login
 ```
 
 输出解读：
@@ -119,7 +119,7 @@ python scripts/cli.py check-login
 **第二步** — 等待登录完成（**单次调用，无需轮询**）：
 
 ```bash
-python scripts/cli.py wait-login
+uv run scripts/cli.py wait-login
 ```
 
 - 连接已有 Chrome tab，内部阻塞等待（最多 120 秒）。
@@ -140,7 +140,7 @@ python scripts/cli.py wait-login
 > 收到用户明确回复手机号后，才能执行以下命令。**不得跳过此步。**
 
 ```bash
-python scripts/cli.py send-code --phone <用户确认的手机号>
+uv run scripts/cli.py send-code --phone <用户确认的手机号>
 ```
 - 自动填写手机号、勾选用户协议、点击"获取验证码"。
 - Chrome 页面保持打开，等待下一步。
@@ -152,7 +152,7 @@ python scripts/cli.py send-code --phone <用户确认的手机号>
 > 告知用户验证码已发送，询问："请输入您收到的 6 位短信验证码"，获得回复后再执行以下命令。
 
 ```bash
-python scripts/cli.py verify-code --code <用户提供的6位验证码>
+uv run scripts/cli.py verify-code --code <用户提供的6位验证码>
 ```
 - 自动填写验证码、点击登录。
 - 输出：`{"logged_in": true, "message": "登录成功"}`
@@ -162,8 +162,8 @@ python scripts/cli.py verify-code --code <用户提供的6位验证码>
 > `delete-cookies` 命令内部自动完成两步：先通过页面 UI 点击「更多」→「退出登录」，再删除本地 cookies 文件。只需执行一条命令即可。
 
 ```bash
-python scripts/cli.py delete-cookies
-python scripts/cli.py --account work delete-cookies  # 指定账号
+uv run scripts/cli.py delete-cookies
+uv run scripts/cli.py --account work delete-cookies  # 指定账号
 ```
 
 ## 多账号工作流
@@ -173,10 +173,10 @@ python scripts/cli.py --account work delete-cookies  # 指定账号
 ### 添加账号
 
 ```bash
-python scripts/cli.py add-account --name work --description "工作号"
+uv run scripts/cli.py add-account --name work --description "工作号"
 # 输出: {"success": true, "name": "work", "port": 9223, "profile_dir": "..."}
 
-python scripts/cli.py add-account --name personal
+uv run scripts/cli.py add-account --name personal
 # 输出: {"success": true, "name": "personal", "port": 9224, "profile_dir": "..."}
 ```
 
@@ -185,18 +185,18 @@ python scripts/cli.py add-account --name personal
 通过全局 `--account` 参数指定账号，CLI 自动切换到对应端口和 Chrome Profile：
 
 ```bash
-python scripts/cli.py --account work check-login
-python scripts/cli.py --account work get-qrcode
-python scripts/cli.py --account personal check-login
-python scripts/cli.py check-login  # 不指定账号，使用默认端口 9222
+uv run scripts/cli.py --account work check-login
+uv run scripts/cli.py --account work get-qrcode
+uv run scripts/cli.py --account personal check-login
+uv run scripts/cli.py check-login  # 不指定账号，使用默认端口 9222
 ```
 
 ### 管理账号
 
 ```bash
-python scripts/cli.py list-accounts                      # 列出所有账号及端口
-python scripts/cli.py set-default-account --name work    # 设置默认账号
-python scripts/cli.py remove-account --name personal     # 删除账号
+uv run scripts/cli.py list-accounts                      # 列出所有账号及端口
+uv run scripts/cli.py set-default-account --name work    # 设置默认账号
+uv run scripts/cli.py remove-account --name personal     # 删除账号
 ```
 
 ---

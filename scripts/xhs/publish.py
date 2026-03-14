@@ -286,6 +286,9 @@ def _extract_hashtags_from_content(content: str, tags: list[str]) -> tuple[str, 
     Returns:
         (cleaned_content, merged_tags)
     """
+    # 预处理 tags: 去掉空格
+    tags = [t.replace(" ", "") for t in tags if t.strip()]
+
     lines = content.rstrip().split("\n")
     # 检查最后一行是否全是 #tag 格式
     if lines:
@@ -294,6 +297,8 @@ def _extract_hashtags_from_content(content: str, tags: list[str]) -> tuple[str, 
         if hashtag_pattern.match(last_line):
             # 提取 hashtag
             extracted = re.findall(r"#(\S+)", last_line)
+            # 去掉空格并去重
+            extracted = list({t.replace(" ", "") for t in extracted if t.strip()})
             # 合并到 tags（去重）
             existing = {t.lstrip("#") for t in tags}
             merged = list(tags)
@@ -432,8 +437,8 @@ def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
     page.click_element(content_selector)
     time.sleep(0.3)
 
-    # 移动光标到正文末尾（20次 ArrowDown）
-    for _ in range(20):
+    # 使用 ArrowDown 键回到正文结尾
+    for _ in range(500):
         page.press_key("ArrowDown")
         time.sleep(0.01)
 

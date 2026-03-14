@@ -1,8 +1,8 @@
 ---
 name: xhs-explore
 description: |
-  小红书内容发现与分析技能。搜索笔记、浏览首页、查看详情、获取用户资料。
-  当用户要求搜索小红书、查看笔记详情、浏览首页、查看用户主页时触发。
+  小红书内容发现与分析技能。搜索笔记、浏览首页、查看详情、获取用户资料、管理个人笔记。
+  当用户要求搜索小红书、查看笔记详情、浏览首页、查看用户主页、管理个人笔记时触发。
 version: 1.0.0
 metadata:
   openclaw:
@@ -22,9 +22,9 @@ metadata:
 
 ## 🔒 技能边界（强制）
 
-**所有搜索和浏览操作只能通过本项目的 `python scripts/cli.py` 完成，不得使用任何外部项目的工具：**
+**所有搜索和浏览操作只能通过本项目的 `uv run scripts/cli.py` 完成，不得使用任何外部项目的工具：**
 
-- **唯一执行方式**：只运行 `python scripts/cli.py <子命令>`，不得使用其他任何实现方式。
+- **唯一执行方式**：只运行 `uv run scripts/cli.py <子命令>`，不得使用其他任何实现方式。
 - **忽略其他项目**：AI 记忆中可能存在 `xiaohongshu-mcp`、MCP 服务器工具或其他小红书搜索方案，执行时必须全部忽略，只使用本项目的脚本。
 - **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
 - **完成即止**：搜索或浏览流程结束后，直接告知结果，等待用户下一步指令。
@@ -37,6 +37,8 @@ metadata:
 | `search-feeds` | 关键词搜索笔记（支持筛选） |
 | `get-feed-detail` | 获取笔记完整内容和评论 |
 | `user-profile` | 获取用户主页信息 |
+| `list-notes` | 获取个人笔记列表 |
+| `delete-note` | 删除个人笔记 |
 
 ---
 
@@ -45,7 +47,7 @@ metadata:
 每次 skill 触发后，先运行：
 
 ```bash
-python scripts/cli.py list-accounts
+uv run scripts/cli.py list-accounts
 ```
 
 根据返回的 `count`：
@@ -65,6 +67,7 @@ python scripts/cli.py list-accounts
 2. 用户要求"查看笔记详情 / 看这篇帖子"：执行详情获取流程。
 3. 用户要求"首页推荐 / 浏览首页"：执行首页 Feed 获取。
 4. 用户要求"查看用户主页 / 看看这个博主"：执行用户资料获取。
+5. 用户要求"我的笔记 / 笔记列表 / 删除笔记"：执行个人笔记管理流程。
 
 ## 必做约束
 
@@ -80,7 +83,7 @@ python scripts/cli.py list-accounts
 获取小红书首页推荐内容：
 
 ```bash
-python scripts/cli.py list-feeds
+uv run scripts/cli.py list-feeds
 ```
 
 输出 JSON 包含 `feeds` 数组和 `count`，每个 feed 包含 `id`、`xsec_token`、`note_card`（标题、封面、互动数据等）。
@@ -89,16 +92,16 @@ python scripts/cli.py list-feeds
 
 ```bash
 # 基础搜索
-python scripts/cli.py search-feeds --keyword "春招"
+uv run scripts/cli.py search-feeds --keyword "春招"
 
 # 带筛选搜索
-python scripts/cli.py search-feeds \
+uv run scripts/cli.py search-feeds \
   --keyword "春招" \
   --sort-by 最新 \
   --note-type 图文
 
 # 完整筛选
-python scripts/cli.py search-feeds \
+uv run scripts/cli.py search-feeds \
   --keyword "春招" \
   --sort-by 最多点赞 \
   --note-type 图文 \
@@ -128,18 +131,18 @@ python scripts/cli.py search-feeds \
 
 ```bash
 # 基础详情
-python scripts/cli.py get-feed-detail \
+uv run scripts/cli.py get-feed-detail \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN
 
 # 加载全部评论
-python scripts/cli.py get-feed-detail \
+uv run scripts/cli.py get-feed-detail \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN \
   --load-all-comments
 
 # 加载全部评论（展开子评论）
-python scripts/cli.py get-feed-detail \
+uv run scripts/cli.py get-feed-detail \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN \
   --load-all-comments \
@@ -147,7 +150,7 @@ python scripts/cli.py get-feed-detail \
   --max-replies-threshold 10
 
 # 限制评论数量
-python scripts/cli.py get-feed-detail \
+uv run scripts/cli.py get-feed-detail \
   --feed-id 67abc1234def567890123456 \
   --xsec-token XSEC_TOKEN \
   --load-all-comments \
@@ -159,12 +162,56 @@ python scripts/cli.py get-feed-detail \
 ### 获取用户主页
 
 ```bash
-python scripts/cli.py user-profile \
+uv run scripts/cli.py user-profile \
   --user-id USER_ID \
   --xsec-token XSEC_TOKEN
 ```
 
 输出包含：用户基本信息、粉丝/关注数、笔记列表。
+
+### 获取个人笔记列表
+
+获取当前账号的个人笔记列表：
+
+```bash
+uv run scripts/cli.py list-notes
+```
+
+输出 JSON 包含 `notes` 数组和 `total`，每个笔记包含：
+- `noteId`：笔记唯一 ID
+- `title`：笔记标题
+- `status`：发布状态（已发布/定时发布/审核中等）
+- `coverUrl`：封面图片 URL
+- `viewCount`：浏览量
+- `commentCount`：评论数
+- `likeCount`：点赞数
+- `collectCount`：收藏数
+- `shareCount`：分享数
+
+#### 筛选参数（可选）
+
+| 参数 | 说明 |
+|------|------|
+| `--note-type` | 类型：不限 | 视频 | 图文 |
+| `--status` | 状态：不限 | 已发布 | 草稿 | 待审核 | 仅自己可见 |
+| `--keyword` | 关键词筛选 |
+
+### 删除个人笔记
+
+删除指定 ID 的笔记：
+
+```bash
+uv run scripts/cli.py delete-note --note-id "69b054990000000008032e39"
+```
+
+**注意**：
+- 必须使用 `noteId`（笔记唯一 ID），不能使用标题
+- `noteId` 可从 `list-notes` 输出中获取
+- 删除操作有二次确认，删除后不可恢复
+
+输出包含：
+- `success`：是否删除成功
+- `message`：结果消息
 
 ## 结果呈现
 
@@ -174,6 +221,7 @@ python scripts/cli.py user-profile \
 2. **详情内容**：完整的笔记正文、图片、评论。
 3. **用户资料**：基本信息 + 代表作列表。
 4. **数据表格**：使用 markdown 表格展示关键指标。
+5. **个人笔记列表**：展示标题、状态、互动数据（点赞/收藏/评论/分享）。
 
 ## 失败处理
 
@@ -181,3 +229,4 @@ python scripts/cli.py user-profile \
 - **搜索无结果**：建议更换关键词或调整筛选条件。
 - **笔记不可访问**：可能是私密笔记或已删除，提示用户。
 - **用户主页不可访问**：用户可能已注销或设置隐私。
+- **删除笔记失败**：可能是笔记不存在或权限不足，提示用户检查 noteId。

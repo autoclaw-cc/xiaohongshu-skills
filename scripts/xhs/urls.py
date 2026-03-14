@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 EXPLORE_URL = "https://www.xiaohongshu.com/explore"
 HOME_URL = "https://www.xiaohongshu.com"
 PUBLISH_URL = "https://creator.xiaohongshu.com/publish/publish?source=official"
+NOTE_MANAGER_URL = "https://creator.xiaohongshu.com/new/note-manager"
 
 
 def make_feed_detail_url(feed_id: str, xsec_token: str) -> str:

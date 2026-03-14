@@ -672,6 +672,42 @@ def cmd_user_profile(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_list_notes(args: argparse.Namespace) -> None:
+    """获取个人笔记列表。"""
+    from xhs.node_manager import list_notes
+
+    browser, page = _connect(args)
+    try:
+        result = list_notes(
+            page,
+            note_type=args.note_type or "",
+            status=args.status or "",
+            keyword=args.keyword or "",
+        )
+        _output(result.to_dict())
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
+def cmd_get_note_detail(args: argparse.Namespace) -> None:
+    """获取笔记详情（已移除，请使用 list-notes 查看笔记列表）。"""
+    _output({"success": False, "error": "get-note-detail 命令已移除，请使用 list-notes 查看笔记列表"})
+
+
+def cmd_delete_note(args: argparse.Namespace) -> None:
+    """删除笔记。"""
+    from xhs.node_manager import delete_note
+
+    browser, page = _connect(args)
+    try:
+        result = delete_note(page, args.note_id)
+        _output(result.to_dict())
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
 def cmd_post_comment(args: argparse.Namespace) -> None:
     """发表评论。"""
     from xhs.comment import post_comment
@@ -1122,6 +1158,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--user-id", required=True, help="用户 ID")
     sub.add_argument("--xsec-token", required=True, help="xsec_token")
     sub.set_defaults(func=cmd_user_profile)
+
+    # list-notes（个人笔记列表）
+    sub = subparsers.add_parser("list-notes", help="获取个人笔记列表")
+    sub.add_argument("--note-type", help="类型：不限|视频|图文")
+    sub.add_argument("--status", help="状态：不限|已发布|草稿|待审核|仅自己可见")
+    sub.add_argument("--keyword", help="关键词筛选")
+    sub.set_defaults(func=cmd_list_notes)
+
+    # get-note-detail（个人笔记详情）
+    sub = subparsers.add_parser("get-note-detail", help="获取笔记详情（已移除）")
+    sub.set_defaults(func=cmd_get_note_detail)
+
+    # delete-note（删除笔记）
+    sub = subparsers.add_parser("delete-note", help="删除笔记")
+    sub.add_argument("--note-id", required=True, help="笔记 ID")
+    sub.set_defaults(func=cmd_delete_note)
 
     # post-comment
     sub = subparsers.add_parser("post-comment", help="发表评论")

@@ -76,7 +76,7 @@ metadata:
 
 ### xhs-explore — 内容发现
 
-搜索笔记、查看详情、获取用户资料。
+搜索笔记、查看详情、获取用户资料、管理个人笔记。
 
 | 命令 | 功能 |
 |------|------|
@@ -84,6 +84,8 @@ metadata:
 | `cli.py search-feeds` | 关键词搜索笔记 |
 | `cli.py get-feed-detail` | 获取笔记完整内容和评论 |
 | `cli.py user-profile` | 获取用户主页信息 |
+| `cli.py list-notes` | 获取个人笔记列表（含点赞、收藏、评论数） |
+| `cli.py delete-note --note-id <ID>` | 删除指定笔记 |
 
 ### xhs-interact — 社交互动
 
@@ -104,35 +106,41 @@ metadata:
 
 ```bash
 # 1. 启动 Chrome
-python scripts/chrome_launcher.py
+uv run scripts/chrome_launcher.py
 
 # 2. 检查登录状态
-python scripts/cli.py check-login
+uv run scripts/cli.py check-login
 
 # 3. 登录（如需要）
-python scripts/cli.py login
+uv run scripts/cli.py login
 
 # 4. 搜索笔记
-python scripts/cli.py search-feeds --keyword "关键词"
+uv run scripts/cli.py search-feeds --keyword "关键词"
 
 # 5. 查看笔记详情
-python scripts/cli.py get-feed-detail \
+uv run scripts/cli.py get-feed-detail \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 
-# 6. 发布图文
-python scripts/cli.py publish \
+# 6. 获取个人笔记列表
+uv run scripts/cli.py list-notes
+
+# 7. 删除个人笔记
+uv run scripts/cli.py delete-note --note-id "69b054990000000008032e39"
+
+# 8. 发布图文
+uv run scripts/cli.py publish \
   --title-file title.txt \
   --content-file content.txt \
   --images "/abs/path/pic1.jpg"
 
-# 7. 发表评论
-python scripts/cli.py post-comment \
+# 9. 发表评论
+uv run scripts/cli.py post-comment \
   --feed-id FEED_ID \
   --xsec-token XSEC_TOKEN \
   --content "评论内容"
 
-# 8. 点赞
-python scripts/cli.py like-feed \
+# 10. 点赞
+uv run scripts/cli.py like-feed \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 ```
 
