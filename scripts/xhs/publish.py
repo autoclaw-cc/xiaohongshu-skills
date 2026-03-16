@@ -991,11 +991,12 @@ def _set_location(page: Page, location_name: str) -> None:
     # 等待搜索结果返回
     time.sleep(2.5)
 
-    # 点击第一个可见搜索结果
+    # 收集所有可见搜索结果，优先精确/包含匹配，回退第一个
+    import json as _json
     selected = page.evaluate(
-        """
-        (() => {
-            // d-select 下拉选项
+        f"""
+        (() => {{
+            const query = {_json.dumps(location_name)};
             const selectors = [
                 '.d-options-wrapper .d-option-name',
                 '.d-dropdown-content .d-option-name',
@@ -1004,18 +1005,31 @@ def _set_location(page: Page, location_name: str) -> None:
                 'div[class*="poi"] div',
                 'div[class*="location-item"]',
             ];
-            for (const sel of selectors) {
+            // 收集所有可见结果
+            const candidates = [];
+            for (const sel of selectors) {{
                 const els = document.querySelectorAll(sel);
-                for (const el of els) {
+                for (const el of els) {{
                     const rect = el.getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0 && el.textContent.trim().length > 0) {
-                        el.click();
-                        return {selected: true, text: el.textContent.trim().substring(0, 40)};
-                    }
-                }
-            }
-            return {selected: false};
-        })()
+                    if (rect.width > 0 && rect.height > 0) {{
+                        const text = el.textContent.trim();
+                        if (text.length > 0) {{
+                            candidates.push({{el, text}});
+                        }}
+                    }}
+                }}
+                if (candidates.length > 0) break; // 找到第一个有效选择器就停
+            }}
+            if (candidates.length === 0) return {{selected: false}};
+            // 1. 精确匹配
+            let target = candidates.find(c => c.text === query);
+            // 2. 包含匹配
+            if (!target) target = candidates.find(c => c.text.includes(query));
+            // 3. 回退第一个
+            if (!target) target = candidates[0];
+            target.el.click();
+            return {{selected: true, text: target.text.substring(0, 40)}};
+        }})()
         """
     )
 
