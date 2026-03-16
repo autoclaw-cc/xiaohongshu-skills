@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import re
 import time
+
+from title_utils import calc_title_length
 
 from .cdp import Page
 from .errors import ContentTooLongError, PublishError, TitleTooLongError, UploadTimeoutError
@@ -26,7 +29,6 @@ from .selectors import (
     TAG_TOPIC_CONTAINER,
     TITLE_INPUT,
     TITLE_MAX_SUFFIX,
-    UPLOAD_CONTENT,
     UPLOAD_INPUT,
     VISIBILITY_DROPDOWN,
     VISIBILITY_OPTIONS,
@@ -253,8 +255,6 @@ def _remove_pop_cover(page: Page) -> None:
 
 def _upload_images(page: Page, image_paths: list[str]) -> None:
     """逐张上传图片。"""
-    import os
-
     valid_paths = [p for p in image_paths if os.path.exists(p)]
     if not valid_paths:
         raise PublishError("没有有效的图片文件")
@@ -335,8 +335,6 @@ def _fill_publish_form(
     content, tags = _extract_hashtags_from_content(content, tags)
 
     # 标题——填写前先校验长度，超限直接报错（由 AI 重新生成标题）
-    from title_utils import calc_title_length
-
     title_len = calc_title_length(title)
     if title_len > 20:
         raise TitleTooLongError(str(title_len), "20")
@@ -734,76 +732,6 @@ def _confirm_original_declaration(page: Page) -> None:
     time.sleep(0.3)
 
 
-# ========== Phase 0: 选择器探测 ==========
-
-
-def inspect_publish_page(page: Page) -> dict:
-    """导航到发布页并 dump 相关 DOM 结构，返回 JSON。"""
-    _navigate_to_publish_page(page)
-    _click_publish_tab(page, "上传图文")
-    time.sleep(2)
-
-    result = page.evaluate(
-        """
-        (() => {
-            const data = {switchCards: [], dropdowns: [], addComponents: [], otherControls: []};
-
-            // 所有 switch-card
-            document.querySelectorAll('div.custom-switch-card, div.switch-card').forEach(card => {
-                const text = card.textContent.trim().substring(0, 100);
-                const sw = card.querySelector('div.d-switch, .d-switch');
-                const input = sw ? sw.querySelector('input[type="checkbox"]') : null;
-                data.switchCards.push({
-                    text: text,
-                    hasSwitch: !!sw,
-                    checked: input ? input.checked : null,
-                    className: card.className,
-                    outerHTML: card.outerHTML.substring(0, 300)
-                });
-            });
-
-            // 所有 dropdown / select
-            document.querySelectorAll('div.d-select-content, div.d-select, select').forEach(el => {
-                const parent = el.closest('div.permission-card-wrapper, div.select-wrapper, div[class*="select"], div[class*="collection"]');
-                data.dropdowns.push({
-                    text: (parent || el).textContent.trim().substring(0, 100),
-                    className: el.className,
-                    parentClass: parent ? parent.className : '',
-                    outerHTML: el.outerHTML.substring(0, 300)
-                });
-            });
-
-            // 带"添加"文本的可点击元素
-            document.querySelectorAll('div[class*="add"], span[class*="add"], div.entry, div.input-card').forEach(el => {
-                const text = el.textContent.trim();
-                if (text.includes('添加') || text.includes('选择') || text.includes('地点') || text.includes('文件')) {
-                    data.addComponents.push({
-                        text: text.substring(0, 100),
-                        className: el.className,
-                        tagName: el.tagName,
-                        outerHTML: el.outerHTML.substring(0, 300)
-                    });
-                }
-            });
-
-            // 更多设置区域
-            const moreSettings = document.querySelectorAll('div[class*="more"], div[class*="setting"]');
-            moreSettings.forEach(el => {
-                data.otherControls.push({
-                    text: el.textContent.trim().substring(0, 200),
-                    className: el.className,
-                    outerHTML: el.outerHTML.substring(0, 300)
-                });
-            });
-
-            return JSON.stringify(data);
-        })()
-        """
-    )
-
-    return json.loads(result) if isinstance(result, str) else result
-
-
 # ========== Phase 1: 开关 ==========
 
 
@@ -895,15 +823,22 @@ def _set_collection(page: Page, collection_name: str) -> None:
 
 def _set_content_type(page: Page, content_type_name: str) -> None:
     """点击"添加内容类型声明"下拉，选择对应类型。"""
-    # 点击内容类型声明区域
+    # 点击内容类型声明区域（优先按 class 匹配，回退文本匹配叶子节点）
     clicked = page.evaluate(
         """
         (() => {
+            // 优先按 class 找 content-type 相关组件
+            const specific = document.querySelector(
+                '[class*="content-type"], [class*="contentType"], [class*="type-declare"]'
+            );
+            if (specific) { specific.click(); return 'clicked'; }
+            // 回退：找包含"内容类型"的最内层可点击元素
             const allEls = document.querySelectorAll('div, span');
             for (const el of allEls) {
                 const text = el.textContent.trim();
-                if ((text.includes('内容类型') || text.includes('类型声明')) && el.children.length <= 3) {
-                    el.click();
+                if ((text.includes('内容类型') || text.includes('类型声明'))
+                    && el.children.length === 0) {
+                    (el.closest('div.input-card, div.entry') || el).click();
                     return 'clicked';
                 }
             }
@@ -1041,8 +976,6 @@ def _set_location(page: Page, location_name: str) -> None:
 
 def _set_attachment(page: Page, file_path: str) -> None:
     """上传附件文件（PDF/DOC/PPT 等）。"""
-    import os
-
     if not os.path.exists(file_path):
         raise PublishError(f"附件文件不存在: {file_path}")
 

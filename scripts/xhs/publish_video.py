@@ -6,8 +6,10 @@ import logging
 import os
 import time
 
+from title_utils import calc_title_length
+
 from .cdp import Page
-from .errors import PublishError, UploadTimeoutError
+from .errors import PublishError, TitleTooLongError, UploadTimeoutError
 from .publish import (
     _apply_publish_options,
     _click_publish_tab,
@@ -152,7 +154,11 @@ def _fill_publish_video_form(
     attachment_path: str = "",
 ) -> None:
     """填写视频表单（不点击发布）。"""
-    # 标题
+    # 标题——填写前先校验长度，超限直接报错（由 AI 重新生成标题）
+    title_len = calc_title_length(title)
+    if title_len > 20:
+        raise TitleTooLongError(str(title_len), "20")
+
     page.input_text(TITLE_INPUT, title)
     time.sleep(1)
 
