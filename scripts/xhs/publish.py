@@ -992,11 +992,10 @@ def _set_location(page: Page, location_name: str) -> None:
     time.sleep(2.5)
 
     # 收集所有可见搜索结果，优先精确/包含匹配，回退第一个
-    import json as _json
     selected = page.evaluate(
         f"""
         (() => {{
-            const query = {_json.dumps(location_name)};
+            const query = {json.dumps(location_name)};
             const selectors = [
                 '.d-options-wrapper .d-option-name',
                 '.d-dropdown-content .d-option-name',
