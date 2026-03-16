@@ -9,12 +9,11 @@ import time
 from .cdp import Page
 from .errors import PublishError, UploadTimeoutError
 from .publish import (
+    _apply_publish_options,
     _click_publish_tab,
     _find_content_element,
     _input_tags,
     _navigate_to_publish_page,
-    _set_schedule_publish,
-    _set_visibility,
 )
 from .selectors import (
     FILE_INPUT,
@@ -74,6 +73,12 @@ def fill_publish_video_form(page: Page, content: PublishVideoContent) -> None:
         content.tags,
         content.schedule_time,
         content.visibility,
+        allow_duet=content.allow_duet,
+        allow_copy=content.allow_copy,
+        collection=content.collection,
+        content_type=content.content_type,
+        location=content.location,
+        attachment_path=content.attachment_path,
     )
 
 
@@ -138,6 +143,13 @@ def _fill_publish_video_form(
     tags: list[str],
     schedule_time: str | None,
     visibility: str,
+    *,
+    allow_duet: bool = True,
+    allow_copy: bool = True,
+    collection: str = "",
+    content_type: str = "",
+    location: str = "",
+    attachment_path: str = "",
 ) -> None:
     """填写视频表单（不点击发布）。"""
     # 标题
@@ -156,12 +168,18 @@ def _fill_publish_video_form(
         _input_tags(page, content_selector, tags)
     time.sleep(1)
 
-    # 定时发布
-    if schedule_time:
-        _set_schedule_publish(page, schedule_time)
-
-    # 可见范围
-    _set_visibility(page, visibility)
+    # 应用发布选项
+    _apply_publish_options(
+        page,
+        schedule_time=schedule_time,
+        visibility=visibility,
+        allow_duet=allow_duet,
+        allow_copy=allow_copy,
+        collection=collection,
+        content_type=content_type,
+        location=location,
+        attachment_path=attachment_path,
+    )
 
     logger.info("视频表单填写完成，等待确认发布")
 

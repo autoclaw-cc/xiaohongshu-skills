@@ -104,6 +104,12 @@ def fill_publish_form(page: Page, content: PublishImageContent) -> None:
         content.schedule_time,
         content.is_original,
         content.visibility,
+        allow_duet=content.allow_duet,
+        allow_copy=content.allow_copy,
+        collection=content.collection,
+        content_type=content.content_type,
+        location=content.location,
+        attachment_path=content.attachment_path,
     )
 
 
@@ -316,12 +322,25 @@ def _fill_publish_form(
     schedule_time: str | None,
     is_original: bool,
     visibility: str,
+    *,
+    allow_duet: bool = True,
+    allow_copy: bool = True,
+    collection: str = "",
+    content_type: str = "",
+    location: str = "",
+    attachment_path: str = "",
 ) -> None:
     """填写表单（不点击发布）。"""
     # 从正文末尾提取 hashtag 并合并到 tags
     content, tags = _extract_hashtags_from_content(content, tags)
 
-    # 标题
+    # 标题——填写前先校验长度，超限直接报错（由 AI 重新生成标题）
+    from title_utils import calc_title_length
+
+    title_len = calc_title_length(title)
+    if title_len > 20:
+        raise TitleTooLongError(str(title_len), "20")
+
     page.input_text(TITLE_INPUT, title)
     time.sleep(0.5)
     _check_title_max_length(page)
@@ -344,6 +363,37 @@ def _fill_publish_form(
     _check_content_max_length(page)
     logger.info("正文长度检查通过")
 
+    # 应用发布选项（定时、可见范围、原创、开关、合集、内容类型、地点、附件）
+    _apply_publish_options(
+        page,
+        schedule_time=schedule_time,
+        visibility=visibility,
+        is_original=is_original,
+        allow_duet=allow_duet,
+        allow_copy=allow_copy,
+        collection=collection,
+        content_type=content_type,
+        location=location,
+        attachment_path=attachment_path,
+    )
+
+    logger.info("表单填写完成，等待确认发布")
+
+
+def _apply_publish_options(
+    page: Page,
+    *,
+    schedule_time: str | None = None,
+    visibility: str = "",
+    is_original: bool = False,
+    allow_duet: bool = True,
+    allow_copy: bool = True,
+    collection: str = "",
+    content_type: str = "",
+    location: str = "",
+    attachment_path: str = "",
+) -> None:
+    """应用所有发布选项（定时、可见范围、原创、合集、内容类型、地点、附件、开关）。"""
     # 定时发布
     if schedule_time:
         _set_schedule_publish(page, schedule_time)
@@ -359,7 +409,48 @@ def _fill_publish_form(
         except Exception as e:
             logger.warning("设置原创声明失败: %s", e)
 
-    logger.info("表单填写完成，等待确认发布")
+    # 合集
+    if collection:
+        try:
+            _set_collection(page, collection)
+        except Exception as e:
+            logger.warning("设置合集失败: %s", e)
+
+    # 内容类型声明
+    if content_type:
+        try:
+            _set_content_type(page, content_type)
+        except Exception as e:
+            logger.warning("设置内容类型失败: %s", e)
+
+    # 地点
+    if location:
+        try:
+            _set_location(page, location)
+        except Exception as e:
+            logger.warning("设置地点失败: %s", e)
+
+    # 附件
+    if attachment_path:
+        try:
+            _set_attachment(page, attachment_path)
+        except Exception as e:
+            logger.warning("设置附件失败: %s", e)
+
+    # 开关（默认开启，只在需要关闭时操作）
+    if not allow_duet:
+        try:
+            _set_toggle_switch(page, "允许合拍", False)
+            logger.info("已关闭允许合拍")
+        except Exception as e:
+            logger.warning("设置合拍开关失败: %s", e)
+
+    if not allow_copy:
+        try:
+            _set_toggle_switch(page, "允许正文复制", False)
+            logger.info("已关闭允许正文复制")
+        except Exception as e:
+            logger.warning("设置复制开关失败: %s", e)
 
 
 def _find_content_element(page: Page) -> str:
@@ -426,10 +517,23 @@ def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
     page.click_element(content_selector)
     time.sleep(0.3)
 
-    # 移动光标到正文末尾（20次 ArrowDown）
-    for _ in range(20):
-        page.press_key("ArrowDown")
-        time.sleep(0.01)
+    # 用 JS 将光标移到 contenteditable 末尾（避免 ArrowDown 次数不够的问题）
+    page.evaluate(
+        f"""
+        (() => {{
+            const el = document.querySelector({json.dumps(content_selector)});
+            if (!el) return;
+            el.focus();
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }})()
+        """
+    )
+    time.sleep(0.2)
 
     # 按两次回车换行
     page.press_key("Enter")
@@ -628,3 +732,310 @@ def _confirm_original_declaration(page: Page) -> None:
 
     logger.info("已成功点击声明原创按钮")
     time.sleep(0.3)
+
+
+# ========== Phase 0: 选择器探测 ==========
+
+
+def inspect_publish_page(page: Page) -> dict:
+    """导航到发布页并 dump 相关 DOM 结构，返回 JSON。"""
+    _navigate_to_publish_page(page)
+    _click_publish_tab(page, "上传图文")
+    time.sleep(2)
+
+    result = page.evaluate(
+        """
+        (() => {
+            const data = {switchCards: [], dropdowns: [], addComponents: [], otherControls: []};
+
+            // 所有 switch-card
+            document.querySelectorAll('div.custom-switch-card, div.switch-card').forEach(card => {
+                const text = card.textContent.trim().substring(0, 100);
+                const sw = card.querySelector('div.d-switch, .d-switch');
+                const input = sw ? sw.querySelector('input[type="checkbox"]') : null;
+                data.switchCards.push({
+                    text: text,
+                    hasSwitch: !!sw,
+                    checked: input ? input.checked : null,
+                    className: card.className,
+                    outerHTML: card.outerHTML.substring(0, 300)
+                });
+            });
+
+            // 所有 dropdown / select
+            document.querySelectorAll('div.d-select-content, div.d-select, select').forEach(el => {
+                const parent = el.closest('div.permission-card-wrapper, div.select-wrapper, div[class*="select"], div[class*="collection"]');
+                data.dropdowns.push({
+                    text: (parent || el).textContent.trim().substring(0, 100),
+                    className: el.className,
+                    parentClass: parent ? parent.className : '',
+                    outerHTML: el.outerHTML.substring(0, 300)
+                });
+            });
+
+            // 带"添加"文本的可点击元素
+            document.querySelectorAll('div[class*="add"], span[class*="add"], div.entry, div.input-card').forEach(el => {
+                const text = el.textContent.trim();
+                if (text.includes('添加') || text.includes('选择') || text.includes('地点') || text.includes('文件')) {
+                    data.addComponents.push({
+                        text: text.substring(0, 100),
+                        className: el.className,
+                        tagName: el.tagName,
+                        outerHTML: el.outerHTML.substring(0, 300)
+                    });
+                }
+            });
+
+            // 更多设置区域
+            const moreSettings = document.querySelectorAll('div[class*="more"], div[class*="setting"]');
+            moreSettings.forEach(el => {
+                data.otherControls.push({
+                    text: el.textContent.trim().substring(0, 200),
+                    className: el.className,
+                    outerHTML: el.outerHTML.substring(0, 300)
+                });
+            });
+
+            return JSON.stringify(data);
+        })()
+        """
+    )
+
+    return json.loads(result) if isinstance(result, str) else result
+
+
+# ========== Phase 1: 开关 ==========
+
+
+def _set_toggle_switch(page: Page, label_text: str, enabled: bool) -> None:
+    """通过标签文本定位 switch-card，设置开关状态。"""
+    result = page.evaluate(
+        f"""
+        (() => {{
+            const cards = document.querySelectorAll('div.custom-switch-card, div.switch-card');
+            for (const card of cards) {{
+                if (!card.textContent.includes({json.dumps(label_text)})) continue;
+                const sw = card.querySelector('div.d-switch');
+                if (!sw) continue;
+                const input = sw.querySelector('input[type="checkbox"]');
+                if (!input) continue;
+                const isOn = input.checked;
+                const want = {json.dumps(enabled)};
+                if (isOn === want) return 'already_set';
+                sw.click();
+                return 'clicked';
+            }}
+            return 'not_found';
+        }})()
+        """
+    )
+
+    if result == "not_found":
+        raise PublishError(f"未找到开关: {label_text}")
+
+    if result == "clicked":
+        time.sleep(0.5)
+
+    logger.info("开关 '%s' 已设置为 %s", label_text, enabled)
+
+
+# ========== Phase 2: 下拉选择 ==========
+
+
+def _set_collection(page: Page, collection_name: str) -> None:
+    """点击"选择合集"下拉，选择匹配名称的合集。"""
+    # 点击 collection-plugin-button（精确匹配文本"选择合集"）
+    clicked = page.evaluate(
+        """
+        (() => {
+            // 优先按 class 找
+            const btn = document.querySelector('div.collection-plugin-button');
+            if (btn) { btn.click(); return 'clicked'; }
+            // 回退：精确文本匹配
+            const allEls = document.querySelectorAll('div, span');
+            for (const el of allEls) {
+                if (el.textContent.trim() === '选择合集') {
+                    el.click();
+                    return 'clicked';
+                }
+            }
+            return 'not_found';
+        })()
+        """
+    )
+
+    if clicked == "not_found":
+        raise PublishError("未找到合集选择区域")
+
+    time.sleep(1)
+
+    # 选择匹配名称的合集（选项结构：div.item > div.item-content > div.item-label）
+    selected = page.evaluate(
+        f"""
+        (() => {{
+            const targets = document.querySelectorAll('div.item-label, div.item-content, div.item');
+            for (const el of targets) {{
+                if (el.textContent.trim() === {json.dumps(collection_name)} ||
+                    el.textContent.trim().includes({json.dumps(collection_name)})) {{
+                    el.click();
+                    return 'selected';
+                }}
+            }}
+            return 'not_found';
+        }})()
+        """
+    )
+
+    if selected == "not_found":
+        raise PublishError(f"未找到合集: {collection_name}")
+
+    logger.info("已选择合集: %s", collection_name)
+    time.sleep(0.5)
+
+
+def _set_content_type(page: Page, content_type_name: str) -> None:
+    """点击"添加内容类型声明"下拉，选择对应类型。"""
+    # 点击内容类型声明区域
+    clicked = page.evaluate(
+        """
+        (() => {
+            const allEls = document.querySelectorAll('div, span');
+            for (const el of allEls) {
+                const text = el.textContent.trim();
+                if ((text.includes('内容类型') || text.includes('类型声明')) && el.children.length <= 3) {
+                    el.click();
+                    return 'clicked';
+                }
+            }
+            return 'not_found';
+        })()
+        """
+    )
+
+    if clicked == "not_found":
+        raise PublishError("未找到内容类型声明区域")
+
+    time.sleep(1)
+
+    # 选择匹配名称的内容类型
+    selected = page.evaluate(
+        f"""
+        (() => {{
+            const opts = document.querySelectorAll('div.d-grid-item, div.d-options-wrapper div, li, div.option, div[class*="type"] div[class*="item"]');
+            for (const opt of opts) {{
+                if (opt.textContent.trim().includes({json.dumps(content_type_name)})) {{
+                    opt.click();
+                    return 'selected';
+                }}
+            }}
+            return 'not_found';
+        }})()
+        """
+    )
+
+    if selected == "not_found":
+        raise PublishError(f"未找到内容类型: {content_type_name}")
+
+    logger.info("已选择内容类型: %s", content_type_name)
+    time.sleep(0.5)
+
+
+# ========== Phase 3: 搜索交互 ==========
+
+
+def _set_location(page: Page, location_name: str) -> None:
+    """点击地点 d-select → 输入地名 → 选择第一个搜索结果。"""
+    # 地点使用 d-select 组件（class: address-card-select），点击以展开
+    clicked = page.evaluate(
+        """
+        (() => {
+            // 优先按 class 找 address-card-select
+            const sel = document.querySelector('.address-card-select, [class*="address-card"]');
+            if (sel) { sel.click(); return 'clicked'; }
+            // 回退：精确文本匹配
+            const allEls = document.querySelectorAll('div, span');
+            for (const el of allEls) {
+                if (el.textContent.trim() === '添加地点') {
+                    el.click();
+                    return 'clicked';
+                }
+            }
+            return 'not_found';
+        })()
+        """
+    )
+
+    if clicked == "not_found":
+        raise PublishError("未找到'添加地点'选择器")
+
+    time.sleep(0.5)
+
+    # 聚焦 d-select 内的 filter input
+    focused = page.evaluate(
+        """
+        (() => {
+            const inp = document.querySelector('.d-select-input-filter input, .address-card-select input[type="text"]');
+            if (inp) { inp.focus(); return 'focused'; }
+            return 'not_found';
+        })()
+        """
+    )
+
+    if focused == "not_found":
+        raise PublishError("未找到地点搜索框")
+
+    # 用键盘逐字输入（触发 Vue 响应式 + API 搜索）
+    for char in location_name:
+        page.type_text(char, delay_ms=80)
+
+    # 等待搜索结果返回
+    time.sleep(2.5)
+
+    # 点击第一个可见搜索结果
+    selected = page.evaluate(
+        """
+        (() => {
+            // d-select 下拉选项
+            const selectors = [
+                '.d-options-wrapper .d-option-name',
+                '.d-dropdown-content .d-option-name',
+                '.d-options-wrapper .d-grid-item',
+                '.d-dropdown-content div[class*="item"]',
+                'div[class*="poi"] div',
+                'div[class*="location-item"]',
+            ];
+            for (const sel of selectors) {
+                const els = document.querySelectorAll(sel);
+                for (const el of els) {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0 && el.textContent.trim().length > 0) {
+                        el.click();
+                        return {selected: true, text: el.textContent.trim().substring(0, 40)};
+                    }
+                }
+            }
+            return {selected: false};
+        })()
+        """
+    )
+
+    if not selected or not selected.get("selected"):
+        raise PublishError(f"未找到地点搜索结果: {location_name}")
+
+    logger.info("已添加地点: %s → 选中: %s", location_name, selected.get("text", ""))
+    time.sleep(0.5)
+
+
+def _set_attachment(page: Page, file_path: str) -> None:
+    """上传附件文件（PDF/DOC/PPT 等）。"""
+    import os
+
+    if not os.path.exists(file_path):
+        raise PublishError(f"附件文件不存在: {file_path}")
+
+    # 直接向 accept 包含 .pdf 的 file input 注入文件（无需点击按钮）
+    # 页面有多个 file input，前两个是图片(.jpg,.jpeg,.png,.webp)，
+    # 第三个 accept=".pdf,.doc,.docx,.ppt,.pptx" 才是附件 input
+    page.set_file_input('input[accept*=".pdf"]', [file_path])
+    time.sleep(2)
+    logger.info("已上传附件: %s", file_path)

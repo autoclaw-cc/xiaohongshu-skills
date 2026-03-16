@@ -603,6 +603,12 @@ def cmd_publish(args: argparse.Namespace) -> None:
                 schedule_time=args.schedule_at,
                 is_original=args.original,
                 visibility=args.visibility or "",
+                allow_duet=not getattr(args, "no_duet", False),
+                allow_copy=not getattr(args, "no_copy", False),
+                collection=getattr(args, "collection", "") or "",
+                content_type=getattr(args, "content_type", "") or "",
+                location=getattr(args, "location", "") or "",
+                attachment_path=getattr(args, "attachment", "") or "",
             ),
         )
         _output({"success": True, "title": title, "images": len(image_paths), "status": "发布完成"})
@@ -638,6 +644,12 @@ def cmd_fill_publish(args: argparse.Namespace) -> None:
                 schedule_time=args.schedule_at,
                 is_original=args.original,
                 visibility=args.visibility or "",
+                allow_duet=not getattr(args, "no_duet", False),
+                allow_copy=not getattr(args, "no_copy", False),
+                collection=getattr(args, "collection", "") or "",
+                content_type=getattr(args, "content_type", "") or "",
+                location=getattr(args, "location", "") or "",
+                attachment_path=getattr(args, "attachment", "") or "",
             ),
         )
         _output(
@@ -674,6 +686,12 @@ def cmd_fill_publish_video(args: argparse.Namespace) -> None:
                 video_path=args.video,
                 schedule_time=args.schedule_at,
                 visibility=args.visibility or "",
+                allow_duet=not getattr(args, "no_duet", False),
+                allow_copy=not getattr(args, "no_copy", False),
+                collection=getattr(args, "collection", "") or "",
+                content_type=getattr(args, "content_type", "") or "",
+                location=getattr(args, "location", "") or "",
+                attachment_path=getattr(args, "attachment", "") or "",
             ),
         )
         _output(
@@ -809,6 +827,12 @@ def cmd_publish_video(args: argparse.Namespace) -> None:
                 video_path=args.video,
                 schedule_time=args.schedule_at,
                 visibility=args.visibility or "",
+                allow_duet=not getattr(args, "no_duet", False),
+                allow_copy=not getattr(args, "no_copy", False),
+                collection=getattr(args, "collection", "") or "",
+                content_type=getattr(args, "content_type", "") or "",
+                location=getattr(args, "location", "") or "",
+                attachment_path=getattr(args, "attachment", "") or "",
             ),
         )
         _output({"success": True, "title": title, "video": args.video, "status": "发布完成"})
@@ -941,6 +965,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
     sub.add_argument("--original", action="store_true", help="声明原创")
     sub.add_argument("--visibility", help="可见范围")
+    sub.add_argument("--no-duet", action="store_true", help="禁止合拍")
+    sub.add_argument("--no-copy", action="store_true", help="禁止正文复制")
+    sub.add_argument("--collection", help="加入合集（合集名称）")
+    sub.add_argument("--content-type", help="内容类型声明")
+    sub.add_argument("--location", help="添加地点")
+    sub.add_argument("--attachment", help="附件文件路径（PDF/DOC 等）")
     sub.add_argument("--headless", action="store_true", help="无头模式（未登录自动降级）")
     sub.set_defaults(func=cmd_publish)
 
@@ -952,6 +982,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--tags", nargs="*", help="标签")
     sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
     sub.add_argument("--visibility", help="可见范围")
+    sub.add_argument("--no-duet", action="store_true", help="禁止合拍")
+    sub.add_argument("--no-copy", action="store_true", help="禁止正文复制")
+    sub.add_argument("--collection", help="加入合集（合集名称）")
+    sub.add_argument("--content-type", help="内容类型声明")
+    sub.add_argument("--location", help="添加地点")
+    sub.add_argument("--attachment", help="附件文件路径（PDF/DOC 等）")
     sub.add_argument("--headless", action="store_true", help="无头模式（未登录自动降级）")
     sub.set_defaults(func=cmd_publish_video)
 
@@ -964,6 +1000,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
     sub.add_argument("--original", action="store_true", help="声明原创")
     sub.add_argument("--visibility", help="可见范围")
+    sub.add_argument("--no-duet", action="store_true", help="禁止合拍")
+    sub.add_argument("--no-copy", action="store_true", help="禁止正文复制")
+    sub.add_argument("--collection", help="加入合集（合集名称）")
+    sub.add_argument("--content-type", help="内容类型声明")
+    sub.add_argument("--location", help="添加地点")
+    sub.add_argument("--attachment", help="附件文件路径（PDF/DOC 等）")
     sub.set_defaults(func=cmd_fill_publish)
 
     # fill-publish-video（只填写视频表单，不发布）
@@ -974,6 +1016,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--tags", nargs="*", help="标签")
     sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
     sub.add_argument("--visibility", help="可见范围")
+    sub.add_argument("--no-duet", action="store_true", help="禁止合拍")
+    sub.add_argument("--no-copy", action="store_true", help="禁止正文复制")
+    sub.add_argument("--collection", help="加入合集（合集名称）")
+    sub.add_argument("--content-type", help="内容类型声明")
+    sub.add_argument("--location", help="添加地点")
+    sub.add_argument("--attachment", help="附件文件路径（PDF/DOC 等）")
     sub.set_defaults(func=cmd_fill_publish_video)
 
     # click-publish（点击发布按钮）

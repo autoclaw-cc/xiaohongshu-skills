@@ -421,6 +421,12 @@ class PublishImageContent:
     schedule_time: str | None = None  # ISO8601 格式，None 表示立即发布
     is_original: bool = False
     visibility: str = ""  # 公开可见(默认)|仅自己可见|仅互关好友可见
+    allow_duet: bool = True  # 允许合拍，默认开启
+    allow_copy: bool = True  # 允许正文复制，默认开启
+    collection: str = ""  # 合集名称
+    content_type: str = ""  # 内容类型声明
+    location: str = ""  # 地点
+    attachment_path: str = ""  # 附件文件路径
 
 
 @dataclass
@@ -433,6 +439,12 @@ class PublishVideoContent:
     video_path: str = ""
     schedule_time: str | None = None  # ISO8601 格式
     visibility: str = ""  # 公开可见(默认)|仅自己可见|仅互关好友可见
+    allow_duet: bool = True  # 允许合拍，默认开启
+    allow_copy: bool = True  # 允许正文复制，默认开启
+    collection: str = ""  # 合集名称
+    content_type: str = ""  # 内容类型声明
+    location: str = ""  # 地点
+    attachment_path: str = ""  # 附件文件路径
 
 
 # ========== 互动 ==========
