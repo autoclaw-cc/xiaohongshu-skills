@@ -29,6 +29,25 @@ metadata:
 - **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
 - **完成即止**：发布流程结束后，直接告知结果，等待用户下一步指令。
 
+### 🎨 配图生成（强制规则）
+
+**所有需要 AI 生成配图的场景，必须使用 Gemini 3 Pro Image (Nano Banana Pro) 模型。**
+
+- **默认模型**：`gemini-3-pro-image-preview`(Nano Banana Pro)
+- **回退模型**：仅当 `GEMINI_API_KEY` 环境变量不可用时，才回退到 OpenAI `gpt-image-1`
+- **生成脚本**：`scripts/image_gen.py` — `generate_images(prompts, output_dir)`
+- **环境变量**：优先使用 `GEMINI_API_KEY`，回退 `OPENAI_API_KEY`
+
+```python
+# 使用方式
+from image_gen import generate_images
+
+paths = generate_images(
+    prompts=["prompt1", "prompt2", ...],
+    output_dir="/tmp/xhs/publish_content",
+)
+```
+
 **本技能允许使用的全部 CLI 子命令：**
 
 | 子命令 | 用途 |

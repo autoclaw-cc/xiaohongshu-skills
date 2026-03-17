@@ -672,6 +672,50 @@ def cmd_user_profile(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_browse(args: argparse.Namespace) -> None:
+    """以人类节奏浏览搜索结果（支持多关键词 + 相关性筛选）。"""
+    from xhs.browse import browse_keyword, browse_keywords, SCREENSHOT_DIR
+
+    browser, page = _connect(args)
+    try:
+        keywords = [k.strip() for k in args.keyword.split(",") if k.strip()]
+
+        # 解析相关性筛选词
+        relevance_terms = None
+        if args.filter:
+            relevance_terms = [t.strip() for t in args.filter.split(",") if t.strip()]
+
+        if len(keywords) > 1:
+            notes = browse_keywords(
+                page,
+                keywords=keywords,
+                max_notes_per_keyword=args.max_per_keyword,
+                max_notes_total=args.max_notes,
+                max_time=args.max_time,
+                relevance_terms=relevance_terms,
+            )
+        else:
+            notes = browse_keyword(
+                page,
+                keyword=keywords[0],
+                max_notes=args.max_notes,
+                max_time=args.max_time,
+                relevance_terms=relevance_terms,
+            )
+
+        screenshots = sorted([str(p) for p in SCREENSHOT_DIR.glob("*.png")])
+        _output({
+            "success": True,
+            "keywords": keywords,
+            "filter_terms": relevance_terms,
+            "browsed_count": len(notes),
+            "screenshots": screenshots,
+            "notes": notes,
+        })
+    finally:
+        browser.close()
+
+
 def cmd_post_comment(args: argparse.Namespace) -> None:
     """发表评论。"""
     from xhs.comment import post_comment
@@ -1105,6 +1149,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--search-scope", help="范围: 不限|已看过|未看过|已关注")
     sub.add_argument("--location", help="位置: 不限|同城|附近")
     sub.set_defaults(func=cmd_search_feeds)
+
+    # browse（人类化浏览）
+    sub = subparsers.add_parser("browse", help="以人类节奏浏览搜索结果（支持多关键词 + 相关性筛选）")
+    sub.add_argument("--keyword", required=True, help="搜索关键词（逗号分隔支持多个）")
+    sub.add_argument("--filter", default=None, help="相关性筛选词（逗号分隔），卡片标题需包含至少一个词才会被浏览")
+    sub.add_argument("--max-notes", type=int, default=10, help="最多浏览笔记总数 (default: 10)")
+    sub.add_argument("--max-per-keyword", type=int, default=5, help="每个关键词最多浏览数 (default: 5)")
+    sub.add_argument("--max-time", type=float, default=600.0, help="最大浏览时间秒数 (default: 600)")
+    sub.set_defaults(func=cmd_browse)
 
     # get-feed-detail
     sub = subparsers.add_parser("get-feed-detail", help="获取 Feed 详情")

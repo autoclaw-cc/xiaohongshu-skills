@@ -108,17 +108,47 @@ def fill_publish_form(page: Page, content: PublishImageContent) -> None:
 
 
 def click_publish_button(page: Page) -> None:
-    """点击发布按钮。
+    """点击发布按钮并等待发布完成。
+
+    发布成功后 URL 会跳转到 /publish/success，然后重定向回发布页。
+    需要等待足够时间确保发布请求完成。
 
     Args:
         page: CDP 页面对象。
 
     Raises:
-        PublishError: 点击失败。
+        PublishError: 发布失败或超时。
     """
     page.click_element(PUBLISH_BUTTON)
-    time.sleep(3)
-    logger.info("发布完成")
+
+    # 等待 URL 变化确认发布成功（最多 15 秒）
+    for i in range(15):
+        time.sleep(1)
+        url = page.evaluate("location.href") or ""
+        if "success" in url or "published=true" in url:
+            logger.info("发布成功: %s", url)
+            # 再等几秒确保服务端完成处理
+            time.sleep(3)
+            return
+
+    # URL 没变，检查是否有错误提示
+    error_text = page.evaluate("""
+        (() => {
+            const toasts = document.querySelectorAll('[class*=toast], [class*=message], [class*=error]');
+            for (const t of toasts) {
+                if (t.getBoundingClientRect().width > 0) return t.innerText?.trim();
+            }
+            return '';
+        })()
+    """) or ""
+
+    if error_text:
+        logger.error("发布失败: %s", error_text)
+        raise PublishError(f"发布失败: {error_text}")
+
+    # 没有明确错误，可能是按钮没有正确点击
+    logger.warning("发布状态不确定（URL 未变化），可能需要重试")
+    raise PublishError("发布超时：URL 未跳转到成功页面")
 
 
 def save_as_draft(page: Page) -> None:

@@ -44,6 +44,15 @@ metadata:
 | `remove-account --name` | 删除命名账号 |
 | `set-default-account --name` | 设置默认账号 |
 
+**VNC 虚拟显示管理（`vnc_display.py`）：**
+
+| 子命令 | 用途 |
+|--------|------|
+| `python scripts/vnc_display.py start` | 启动虚拟显示 + VNC + noVNC |
+| `python scripts/vnc_display.py stop` | 停止所有 VNC 服务 |
+| `python scripts/vnc_display.py status` | 查看 VNC 服务状态 |
+| `python scripts/vnc_display.py url` | 输出 noVNC 访问地址 |
+
 ---
 
 ## 账号选择（前置步骤）
@@ -72,6 +81,32 @@ python scripts/cli.py list-accounts
 1. 用户要求"检查登录 / 是否登录 / 登录状态"：执行登录状态检查。
 2. 用户要求"登录 / 扫码登录 / 手机登录 / 打开登录页"：执行登录流程。
 3. 用户要求"切换账号 / 换一个账号 / 退出登录 / 清除登录"：执行 `delete-cookies`（内部自动先 UI 退出登录，再清除本地 cookies）。
+
+## 🖥️ 虚拟显示模式（服务器环境）
+
+在无图形界面的服务器上，为了规避小红书风控，应使用虚拟显示让 Chrome 以完整 UI 模式运行：
+
+### 启动虚拟显示（登录前必做）
+
+```bash
+python scripts/vnc_display.py start
+```
+
+输出包含 `novnc_url`，用户可以通过浏览器访问该 URL 实时查看 Chrome 操作界面。
+
+### 工作原理
+
+1. **Xvnc** 提供虚拟 X 显示（替代 Xvfb），同时提供 VNC 协议访问
+2. **noVNC** 通过 WebSocket 将 VNC 转为浏览器可访问的 web 页面
+3. **chrome_launcher** 自动检测虚拟显示，以非 headless 模式启动 Chrome
+4. 用户通过 `http://<服务器IP>:6080/vnc.html?autoconnect=true` 查看实时操作
+
+### 重要
+
+- 启动虚拟显示后，后续所有 CLI 命令需设置 `DISPLAY=:99` 环境变量
+- 示例：`DISPLAY=:99 python scripts/cli.py check-login`
+- 虚拟显示启动后 `has_display()` 自动返回 True，Chrome 将以 UI 模式运行
+- 停止时运行 `python scripts/vnc_display.py stop`
 
 ## 必做约束
 
