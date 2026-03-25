@@ -158,6 +158,7 @@ def launch_chrome(
         args,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     _chrome_process = process
 
