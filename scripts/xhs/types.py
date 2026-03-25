@@ -190,6 +190,23 @@ class DetailImageInfo:
 
 
 @dataclass
+class CommentPicture:
+    width: int = 0
+    height: int = 0
+    url_default: str = ""
+    url_pre: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> CommentPicture:
+        return cls(
+            width=d.get("width", 0),
+            height=d.get("height", 0),
+            url_default=d.get("urlDefault", ""),
+            url_pre=d.get("urlPre", ""),
+        )
+
+
+@dataclass
 class Comment:
     id: str = ""
     note_id: str = ""
@@ -202,6 +219,7 @@ class Comment:
     sub_comment_count: str = ""
     sub_comments: list[Comment] = field(default_factory=list)
     show_tags: list[str] = field(default_factory=list)
+    pictures: list[CommentPicture] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, d: dict) -> Comment:
@@ -217,6 +235,7 @@ class Comment:
             sub_comment_count=d.get("subCommentCount", ""),
             sub_comments=[cls.from_dict(c) for c in d.get("subComments", []) or []],
             show_tags=d.get("showTags", []) or [],
+            pictures=[CommentPicture.from_dict(p) for p in d.get("pictures", []) or []],
         )
 
     def to_dict(self) -> dict:
@@ -232,6 +251,11 @@ class Comment:
             },
             "subCommentCount": self.sub_comment_count,
         }
+        if self.pictures:
+            result["pictures"] = [
+                {"width": p.width, "height": p.height, "urlDefault": p.url_default}
+                for p in self.pictures
+            ]
         if self.sub_comments:
             result["subComments"] = [c.to_dict() for c in self.sub_comments]
         return result
