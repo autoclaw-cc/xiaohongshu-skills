@@ -797,6 +797,38 @@ def cmd_next_step(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_publish_article(args: argparse.Namespace) -> None:
+    """长文一键发布：填写内容 → 选模板 → 填描述 → 发布。"""
+    from xhs.publish_long_article import publish_long_article_full
+
+    with open(args.title_file, encoding="utf-8") as f:
+        title = f.read().strip()
+    with open(args.content_file, encoding="utf-8") as f:
+        content = f.read().strip()
+
+    if args.description_file:
+        with open(args.description_file, encoding="utf-8") as f:
+            description = f.read().strip()
+    else:
+        # 默认用正文前800字作为描述
+        description = content[:800]
+
+    browser, page = _connect(args)
+    try:
+        publish_long_article_full(
+            page,
+            title=title,
+            content=content,
+            description=description,
+            image_paths=args.images or None,
+            template_name=args.template_name or None,
+        )
+        _output({"success": True, "title": title, "status": "长文发布完成"})
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
 def cmd_publish_video(args: argparse.Namespace) -> None:
     """发布视频内容。"""
     from xhs.login import check_login_status
@@ -1027,6 +1059,15 @@ def build_parser() -> argparse.ArgumentParser:
     # click-publish（点击发布按钮）
     sub = subparsers.add_parser("click-publish", help="点击发布按钮")
     sub.set_defaults(func=cmd_click_publish)
+
+    # publish-article（长文一键发布）
+    sub = subparsers.add_parser("publish-article", help="长文一键发布（填写→选模板→填描述→发布）")
+    sub.add_argument("--title-file", required=True, help="标题文件路径")
+    sub.add_argument("--content-file", required=True, help="正文文件路径")
+    sub.add_argument("--description-file", help="发布页描述文件路径（省略则取正文前800字）")
+    sub.add_argument("--images", nargs="*", help="可选图片路径（插入编辑器）")
+    sub.add_argument("--template-name", help="排版模板名称（省略则自动选第一个）")
+    sub.set_defaults(func=cmd_publish_article)
 
     # long-article（长文模式）
     sub = subparsers.add_parser("long-article", help="长文模式：填写 + 一键排版")

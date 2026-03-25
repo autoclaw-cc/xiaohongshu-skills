@@ -256,6 +256,50 @@ def _wait_for_templates(page: Page) -> bool:
     return False
 
 
+def publish_long_article_full(
+    page: Page,
+    title: str,
+    content: str,
+    description: str,
+    image_paths: list[str] | None = None,
+    template_name: str | None = None,
+) -> None:
+    """长文一键发布：填写 → 一键排版 → 选模板 → 下一步 → 填描述 → 发布。
+
+    Args:
+        page: CDP 页面对象。
+        title: 长文标题。
+        content: 长文正文（段落用换行分隔）。
+        description: 发布页描述（≤1000字，超出自动截断到800字）。
+        image_paths: 可选的图片路径列表（插入编辑器）。
+        template_name: 指定模板名称；为 None 时自动选择第一个可用模板。
+
+    Raises:
+        PublishError: 操作失败。
+    """
+    from .publish import click_publish_button
+
+    # 1-8. 填写内容并获取模板列表
+    template_names = publish_long_article(page, title, content, image_paths)
+
+    # 9. 选择模板
+    if not template_names:
+        raise PublishError("未找到任何排版模板，请检查页面状态")
+
+    chosen = template_name if template_name and template_name in template_names else template_names[0]
+    logger.info("选择模板: %s（可用: %s）", chosen, template_names)
+    select_template(page, chosen)
+
+    # 10. 点击下一步 + 填写描述
+    click_next_and_fill_description(page, description)
+    import time
+    time.sleep(1)
+
+    # 11. 点击发布
+    click_publish_button(page)
+    logger.info("长文发布完成")
+
+
 def _click_button_by_text(page: Page, text: str) -> None:
     """通过文本内容查找并点击按钮（通用方法）。"""
     clicked = page.evaluate(

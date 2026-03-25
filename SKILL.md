@@ -66,13 +66,36 @@ metadata:
 
 ### xhs-publish — 内容发布
 
-发布图文或视频内容到小红书。
+发布图文、视频或长文内容到小红书。
 
 | 命令 | 功能 |
 |------|------|
 | `cli.py publish` | 图文发布（本地图片或 URL） |
 | `cli.py publish-video` | 视频发布 |
+| `cli.py publish-article` | **长文一键发布**（填写→选模板→填描述→发布） |
 | `publish_pipeline.py` | 发布流水线（含图片下载和登录检查） |
+
+**长文发布参数：**
+```bash
+python scripts/cli.py publish-article \
+  --title-file /abs/path/title.txt \
+  --content-file /abs/path/content.txt \
+  [--description-file /abs/path/desc.txt]  # 省略则取正文前800字 \
+  [--images /abs/path/img1.jpg]            # 可选，插入编辑器 \
+  [--template-name "模板名称"]              # 省略则自动选第一个
+```
+
+**分步长文发布（如需手动确认模板）：**
+```bash
+# 步骤1：填写内容并获取模板列表
+python scripts/cli.py long-article --title-file title.txt --content-file content.txt
+# 步骤2：选择模板（从步骤1返回的列表中选）
+python scripts/cli.py select-template --name "模板名称"
+# 步骤3：进入发布页并填写描述
+python scripts/cli.py next-step --content-file desc.txt
+# 步骤4：发布
+python scripts/cli.py click-publish
+```
 
 ### xhs-explore — 内容发现
 
