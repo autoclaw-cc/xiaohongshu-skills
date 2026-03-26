@@ -248,25 +248,54 @@ class Page:
         )
 
     def input_content_editable(self, selector: str, text: str) -> None:
-        """向 contentEditable 元素输入文本（CDP 逐字输入，模拟真实打字）。"""
-        # 1. focus 元素
-        self.evaluate(
+        """向可编辑元素输入文本。"""
+        target = self.evaluate(
             f"""
             (() => {{
                 const el = document.querySelector({json.dumps(selector)});
-                if (el) el.focus();
+                if (!el) return null;
+                el.scrollIntoView({{block: 'center', inline: 'nearest'}});
+                const rect = el.getBoundingClientRect();
+                if (typeof el.focus === 'function') {{
+                    el.focus({{preventScroll: true}});
+                }}
+                if (el.isContentEditable) {{
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+                    range.selectNodeContents(el);
+                    range.collapse(false);
+                    selection?.removeAllRanges();
+                    selection?.addRange(range);
+                }} else if (typeof el.setSelectionRange === 'function') {{
+                    const value = 'value' in el ? String(el.value || '') : '';
+                    el.setSelectionRange(value.length, value.length);
+                }}
+                return {{
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2,
+                    tagName: el.tagName,
+                    isTextControl: el.tagName === 'INPUT' || el.tagName === 'TEXTAREA',
+                }};
             }})()
             """
         )
+        if not target:
+            raise ElementNotFoundError(selector)
+
+        if target["x"] is not None and target["y"] is not None:
+            self.mouse_move(target["x"], target["y"])
+            time.sleep(random.uniform(0.03, 0.08))
+            self.mouse_click(target["x"], target["y"])
         time.sleep(0.1)
-        # 2. 全选清空（Ctrl+A + Backspace）
+
+        modifier = self.evaluate("navigator.platform.includes('Mac') ? 4 : 2") or 2
         self._send_session(
             "Input.dispatchKeyEvent",
-            {"type": "keyDown", "key": "a", "code": "KeyA", "modifiers": 2},
+            {"type": "keyDown", "key": "a", "code": "KeyA", "modifiers": modifier},
         )
         self._send_session(
             "Input.dispatchKeyEvent",
-            {"type": "keyUp", "key": "a", "code": "KeyA", "modifiers": 2},
+            {"type": "keyUp", "key": "a", "code": "KeyA", "modifiers": modifier},
         )
         self._send_session(
             "Input.dispatchKeyEvent",
@@ -287,19 +316,35 @@ class Page:
             },
         )
         time.sleep(0.1)
-        # 3. 逐字输入（随机 30-80ms 间隔，换行符转为 Enter 键）
-        for char in text:
-            if char == "\n":
+
+        if target["isTextControl"]:
+            self.evaluate(
+                f"""
+                (() => {{
+                    const el = document.querySelector({json.dumps(selector)});
+                    if (!el) return;
+                    const proto = el.tagName === 'TEXTAREA'
+                        ? window.HTMLTextAreaElement.prototype
+                        : window.HTMLInputElement.prototype;
+                    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                    if (setter) {{
+                        setter.call(el, {json.dumps(text)});
+                    }} else {{
+                        el.value = {json.dumps(text)};
+                    }}
+                    el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                }})()
+                """
+            )
+            return
+
+        lines = text.split("\n")
+        for index, chunk in enumerate(lines):
+            if chunk:
+                self._send_session("Input.insertText", {"text": chunk})
+            if index < len(lines) - 1:
                 self.press_key("Enter")
-            else:
-                self._send_session(
-                    "Input.dispatchKeyEvent",
-                    {"type": "keyDown", "text": char},
-                )
-                self._send_session(
-                    "Input.dispatchKeyEvent",
-                    {"type": "keyUp", "text": char},
-                )
             time.sleep(random.uniform(0.03, 0.08))
 
     def get_element_text(self, selector: str) -> str | None:
@@ -450,6 +495,11 @@ class Page:
     def press_key(self, key: str) -> None:
         """按下并释放指定键。"""
         key_map = {
+            "Backspace": {
+                "key": "Backspace",
+                "code": "Backspace",
+                "windowsVirtualKeyCode": 8,
+            },
             "Enter": {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13},
             "ArrowDown": {
                 "key": "ArrowDown",

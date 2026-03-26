@@ -36,6 +36,8 @@ from .urls import PUBLISH_URL
 
 logger = logging.getLogger(__name__)
 
+_EDITOR_MARKER_ATTR = "data-xhs-editor-target"
+
 
 def publish_image_content(page: Page, content: PublishImageContent) -> None:
     """发布图文内容（填写表单 + 点击发布）。
@@ -373,32 +375,135 @@ def _find_content_element(page: Page) -> str:
     if page.has_element(CONTENT_EDITOR):
         return CONTENT_EDITOR
 
-    # 查找带 placeholder 的 p 元素的 textbox 父元素
-    found = page.evaluate(
-        """
-        (() => {
-            const ps = document.querySelectorAll('p');
-            for (const p of ps) {
-                const placeholder = p.getAttribute('data-placeholder');
-                if (placeholder && placeholder.includes('输入正文描述')) {
-                    let current = p;
-                    for (let i = 0; i < 5; i++) {
-                        current = current.parentElement;
-                        if (!current) break;
-                        if (current.getAttribute('role') === 'textbox') {
-                            return 'found';
-                        }
-                    }
-                }
-            }
-            return '';
-        })()
-        """
+    selector = _find_best_editable_element(
+        page,
+        marker_value="content",
+        preferred_selectors=[
+            CONTENT_EDITOR,
+            "div.ProseMirror",
+            "[contenteditable='true'][role='textbox']",
+            "[contenteditable='plaintext-only'][role='textbox']",
+            "[role='textbox'][contenteditable]",
+            "div[contenteditable='true']",
+            "div[contenteditable='plaintext-only']",
+            "textarea[placeholder*='正文']",
+            "textarea[placeholder*='描述']",
+        ],
+        positive_keywords=["正文", "描述", "内容", "文章", "写下", "输入", "添加"],
+        negative_keywords=["标题", "搜索", "验证码", "手机号"],
     )
-    if found == "found":
-        return "[role='textbox']"
+    if selector:
+        return selector
 
     raise PublishError("没有找到内容输入框")
+
+
+def _find_best_editable_element(
+    page: Page,
+    *,
+    marker_value: str,
+    preferred_selectors: list[str],
+    positive_keywords: list[str],
+    negative_keywords: list[str] | None = None,
+) -> str:
+    """为动态页面定位最可能的可编辑输入区域。"""
+    selector = page.evaluate(
+        f"""
+        (() => {{
+            const markerAttr = {json.dumps(_EDITOR_MARKER_ATTR)};
+            const markerValue = {json.dumps(marker_value)};
+            const preferredSelectors = {json.dumps(preferred_selectors)};
+            const positiveKeywords = {json.dumps(positive_keywords)};
+            const negativeKeywords = {json.dumps(negative_keywords or [])};
+
+            const isVisible = (el) => {{
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+                if (Number(style.opacity || '1') === 0) return false;
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 8 || rect.height < 8) return false;
+                if (rect.bottom < 0 || rect.right < 0) return false;
+                return true;
+            }};
+
+            const isEditable = (el) => {{
+                if (!el) return false;
+                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return true;
+                const role = el.getAttribute('role');
+                const ce = el.getAttribute('contenteditable');
+                return (
+                    el.isContentEditable
+                    || role === 'textbox'
+                    || ce === ''
+                    || ce === 'true'
+                    || ce === 'plaintext-only'
+                );
+            }};
+
+            const addCandidate = (list, seen, el, baseScore) => {{
+                if (!el || seen.has(el) || !isVisible(el) || !isEditable(el)) return;
+                seen.add(el);
+
+                const attrs = [
+                    el.getAttribute('placeholder') || '',
+                    el.getAttribute('data-placeholder') || '',
+                    el.getAttribute('aria-label') || '',
+                    el.getAttribute('aria-placeholder') || '',
+                    el.getAttribute('name') || '',
+                    el.className || '',
+                ];
+                const hint = attrs.join(' ').toLowerCase();
+                let score = baseScore;
+
+                for (const keyword of positiveKeywords) {{
+                    if (hint.includes(keyword.toLowerCase())) score += 24;
+                }}
+                for (const keyword of negativeKeywords) {{
+                    if (hint.includes(keyword.toLowerCase())) score -= 30;
+                }}
+
+                if (el.tagName === 'TEXTAREA') score += 10;
+                if (el.tagName === 'INPUT') score += 4;
+                if (el.isContentEditable) score += 12;
+                if ((el.getAttribute('role') || '') === 'textbox') score += 10;
+                if (hint.includes('ql-editor') || hint.includes('prosemirror')) score += 20;
+                if (hint.includes('editor')) score += 8;
+                if (attrs[0] || attrs[1] || attrs[2] || attrs[3]) score += 5;
+
+                const rect = el.getBoundingClientRect();
+                score += Math.min(rect.width * rect.height / 4000, 20);
+
+                list.push({{el, score}});
+            }};
+
+            document.querySelectorAll(`[${{markerAttr}}]`).forEach((node) => {{
+                node.removeAttribute(markerAttr);
+            }});
+
+            const candidates = [];
+            const seen = new Set();
+            preferredSelectors.forEach((sel, index) => {{
+                document.querySelectorAll(sel).forEach((el) => {{
+                    addCandidate(candidates, seen, el, 140 - index * 10);
+                }});
+            }});
+
+            document.querySelectorAll(
+                'div, section, article, textarea, input, [role="textbox"], [contenteditable]'
+            ).forEach((el) => {{
+                addCandidate(candidates, seen, el, 20);
+            }});
+
+            candidates.sort((a, b) => b.score - a.score);
+            const best = candidates[0]?.el;
+            if (!best) return '';
+            best.setAttribute(markerAttr, markerValue);
+            return `[${{markerAttr}}="${{markerValue}}"]`;
+        }})()
+        """
+    )
+    return selector if isinstance(selector, str) else ""
 
 
 def _check_title_max_length(page: Page) -> None:
