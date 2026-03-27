@@ -16,7 +16,9 @@ from .selectors import (
     CREATOR_TAB,
     DATETIME_INPUT,
     FILE_INPUT,
+    GENERATE_IMAGE_BUTTON_TEXT,
     IMAGE_PREVIEW,
+    NEXT_STEP_BUTTON_TEXT,
     ORIGINAL_SWITCH,
     ORIGINAL_SWITCH_CARD,
     POPOVER,
@@ -24,6 +26,8 @@ from .selectors import (
     SCHEDULE_SWITCH,
     TAG_FIRST_ITEM,
     TAG_TOPIC_CONTAINER,
+    TEXT_COVER_BUTTON_TEXT,
+    TEXT_COVER_INPUT,
     TITLE_INPUT,
     TITLE_MAX_SUFFIX,
     UPLOAD_CONTENT,
@@ -31,7 +35,7 @@ from .selectors import (
     VISIBILITY_DROPDOWN,
     VISIBILITY_OPTIONS,
 )
-from .types import PublishImageContent
+from .types import PublishImageContent, PublishTextCoverContent
 from .urls import PUBLISH_URL
 
 logger = logging.getLogger(__name__)
@@ -369,11 +373,16 @@ def _fill_publish_form(
 
 
 def _find_content_element(page: Page) -> str:
-    """查找内容输入框（兼容两种 UI）。"""
+    """查找内容输入框（兼容多种 UI）。"""
+    # 策略1：查找 ql-editor
     if page.has_element(CONTENT_EDITOR):
         return CONTENT_EDITOR
 
-    # 查找带 placeholder 的 p 元素的 textbox 父元素
+    # 策略2：查找 tiptap ProseMirror 编辑器
+    if page.has_element("div.tiptap.ProseMirror"):
+        return "div.tiptap.ProseMirror"
+
+    # 策略3：查找带 placeholder 的 p 元素的 textbox 父元素
     found = page.evaluate(
         """
         (() => {
@@ -397,6 +406,26 @@ def _find_content_element(page: Page) -> str:
     )
     if found == "found":
         return "[role='textbox']"
+
+    # 策略4：查找任意 contenteditable 元素
+    found_ce = page.evaluate(
+        """
+        (() => {
+            const all = document.querySelectorAll('[contenteditable="true"]');
+            for (const el of all) {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                if (rect.width > 0 && rect.height > 0 && 
+                    style.display !== 'none' && style.visibility !== 'hidden') {
+                    return true;
+                }
+            }
+            return false;
+        })()
+        """
+    )
+    if found_ce:
+        return "[contenteditable='true']"
 
     raise PublishError("没有找到内容输入框")
 
@@ -634,3 +663,350 @@ def _confirm_original_declaration(page: Page) -> None:
 
     logger.info("已成功点击声明原创按钮")
     time.sleep(0.3)
+
+
+# ========== 文字配图发布 ==========
+
+
+def publish_text_cover_content(page: Page, content: PublishTextCoverContent) -> None:
+    """发布文字配图内容（填写表单 + 点击发布）。
+
+    Args:
+        page: CDP 页面对象。
+        content: 发布内容。
+
+    Raises:
+        PublishError: 发布失败。
+        TitleTooLongError: 标题超长。
+        ContentTooLongError: 正文超长。
+    """
+    fill_text_cover_publish_form(page, content)
+    click_publish_button(page)
+
+
+def fill_text_cover_publish_form(page: Page, content: PublishTextCoverContent) -> None:
+    """填写文字配图发布表单，不点击发布按钮。
+
+    Args:
+        page: CDP 页面对象。
+        content: 发布内容。
+
+    Raises:
+        PublishError: 填写失败。
+        TitleTooLongError: 标题超长。
+        ContentTooLongError: 正文超长。
+    """
+    if not content.cover_text:
+        raise PublishError("文字封面内容不能为空")
+
+    # 导航到发布页
+    _navigate_to_publish_page(page)
+    time.sleep(2)
+
+    # 点击"上传图文" TAB
+    _click_publish_tab(page, "上传图文")
+    time.sleep(2)
+
+    # 点击"文字配图"按钮
+    _click_text_cover_button(page)
+    time.sleep(2)
+
+    # 输入文字封面内容
+    _input_text_cover(page, content.cover_text)
+    time.sleep(1)
+
+    # 点击"生成图片"按钮
+    _click_generate_image_button(page)
+    time.sleep(1)
+
+    # 点击"下一步"按钮
+    _click_next_step_button(page)
+    time.sleep(3)
+    page.wait_dom_stable()
+    time.sleep(2)
+
+    # 标签截取
+    tags = content.tags[:10] if len(content.tags) > 10 else content.tags
+    if len(content.tags) > 10:
+        logger.warning("标签数量超过10，截取前10个")
+
+    logger.info(
+        "文字配图发布内容: title=%s, cover_text=%s, tags=%d, schedule=%s, original=%s, visibility=%s",
+        content.title,
+        content.cover_text[:50] + "..." if len(content.cover_text) > 50 else content.cover_text,
+        len(tags),
+        content.schedule_time,
+        content.is_original,
+        content.visibility,
+    )
+
+    # 填写表单（不点击发布）
+    _fill_publish_form(
+        page,
+        content.title,
+        content.content,
+        tags,
+        content.schedule_time,
+        content.is_original,
+        content.visibility,
+    )
+
+
+def _click_text_cover_button(page: Page) -> None:
+    """点击"文字配图"按钮。"""
+    retry_intervals = [1, 2, 3]  # 重试间隔，分别为1秒、2秒、3秒
+    
+    logger.info("开始尝试点击文字配图按钮...")
+    
+    for attempt in range(len(retry_intervals) + 1):
+        logger.info("第 %d 次尝试查找并点击文字配图按钮...", attempt + 1)
+        
+        found = page.evaluate(
+            f"""
+            (() => {{
+                const allElements = document.querySelectorAll('*');
+                for (const el of allElements) {{
+                    if (el.children.length === 0 && el.textContent.trim() === {json.dumps(TEXT_COVER_BUTTON_TEXT)}) {{
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        if (rect.width === 0 || rect.height === 0) continue;
+                        if (rect.left < 0 || rect.top < 0) continue;
+                        if (style.display === 'none' || style.visibility === 'hidden') continue;
+                        el.click();
+                        return 'clicked';
+                    }}
+                }}
+                return 'not_found';
+            }})()
+            """
+        )
+        
+        if found == "clicked":
+            logger.info("成功点击文字配图按钮！")
+            return
+        
+        # 如果还有重试机会
+        if attempt < len(retry_intervals):
+            wait_time = retry_intervals[attempt]
+            logger.info(
+                "未找到文字配图按钮，第 %d 次重试，等待 %d 秒...",
+                attempt + 1,
+                wait_time
+            )
+            time.sleep(wait_time)
+        else:
+            break
+    
+    raise PublishError(f"没有找到 {TEXT_COVER_BUTTON_TEXT} 按钮")
+
+
+def _input_text_cover(page: Page, text: str) -> None:
+    """在文字封面输入框中输入内容。"""
+    retry_intervals = [1, 2, 3]  # 重试间隔，分别为1秒、2秒、3秒
+    
+    logger.info("开始尝试输入文字封面内容...")
+    
+    for attempt in range(len(retry_intervals) + 1):
+        # 先等待并查找输入框
+        logger.info("第 %d 次尝试查找输入框...", attempt + 1)
+        
+        # 先尝试点击并输入
+        success = page.evaluate(
+            f"""
+            (() => {{
+                const selectors = {json.dumps(TEXT_COVER_INPUT)}.split(', ');
+                for (const sel of selectors) {{
+                    const el = document.querySelector(sel.trim());
+                    if (el) {{
+                        // 检查是否可见
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        if (rect.width === 0 || rect.height === 0) continue;
+                        if (style.display === 'none' || style.visibility === 'hidden') continue;
+                        
+                        // 点击元素获得焦点
+                        el.click();
+                        el.focus();
+                        return {{ found: true, selector: sel.trim() }};
+                    }}
+                }}
+                return {{ found: false }};
+            }})()
+            """
+        )
+        
+        if success and success.get("found"):
+            logger.info("找到输入框，开始输入内容...")
+            
+            # 尝试通过 JavaScript 直接设置内容（最可靠的方式）
+            js_success = page.evaluate(
+                f"""
+                (() => {{
+                    const selectors = {json.dumps(TEXT_COVER_INPUT)}.split(', ');
+                    for (const sel of selectors) {{
+                        const el = document.querySelector(sel.trim());
+                        if (el) {{
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            if (rect.width === 0 || rect.height === 0) continue;
+                            if (style.display === 'none' || style.visibility === 'hidden') continue;
+                            
+                            if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {{
+                                el.value = {json.dumps(text)};
+                                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                return true;
+                            }}
+                            if (el.contentEditable === 'true' || el.getAttribute('contenteditable') === 'true') {{
+                                // 对于 ProseMirror 这类编辑器
+                                el.innerHTML = '<p>' + {json.dumps(text)} + '</p>';
+                                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                return true;
+                            }}
+                        }}
+                    }}
+                    return false;
+                }})()
+                """
+            )
+            
+            if js_success:
+                logger.info("文字封面内容输入成功！")
+                time.sleep(0.5)  # 稍等一下让内容稳定
+                return
+        
+        # 如果还有重试机会
+        if attempt < len(retry_intervals):
+            wait_time = retry_intervals[attempt]
+            logger.info(
+                "未找到输入框或输入失败，第 %d 次重试，等待 %d 秒...",
+                attempt + 1,
+                wait_time
+            )
+            time.sleep(wait_time)
+        else:
+            break
+    
+    raise PublishError("没有找到文字封面输入框或输入失败")
+
+
+def _click_generate_image_button(page: Page) -> None:
+    """点击"生成图片"按钮，并等待图片生成完成。"""
+    # 首先点击"生成图片"按钮
+    deadline = time.monotonic() + 15
+    clicked = False
+    while time.monotonic() < deadline:
+        found = page.evaluate(
+            f"""
+            (() => {{
+                const allElements = document.querySelectorAll('*');
+                for (const el of allElements) {{
+                    if (el.children.length === 0 && el.textContent.trim() === {json.dumps(GENERATE_IMAGE_BUTTON_TEXT)}) {{
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        if (rect.width === 0 || rect.height === 0) continue;
+                        if (rect.left < 0 || rect.top < 0) continue;
+                        if (style.display === 'none' || style.visibility === 'hidden') continue;
+                        el.click();
+                        return 'clicked';
+                    }}
+                }}
+                return 'not_found';
+            }})()
+            """
+        )
+        if found == "clicked":
+            clicked = True
+            break
+        time.sleep(0.2)
+    
+    if not clicked:
+        raise PublishError(f"没有找到 {GENERATE_IMAGE_BUTTON_TEXT} 按钮")
+    
+    logger.info("已点击生成图片按钮，开始等待生成完成...")
+    
+    # 等待图片生成完成，使用重试逻辑
+    retry_intervals = [1, 2, 3]  # 重试间隔，分别为1秒、2秒、3秒
+    
+    for attempt in range(len(retry_intervals) + 1):
+        # 检查是否生成是否完成
+        status = page.evaluate(
+            f"""
+            (() => {{
+                let hasGenerateButton = false;
+                let hasNextButton = false;
+                const allElements = document.querySelectorAll('*');
+                for (const el of allElements) {{
+                    if (el.children.length === 0) {{
+                        const text = el.textContent.trim();
+                        if (text === {json.dumps(GENERATE_IMAGE_BUTTON_TEXT)}) {{
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            if (rect.width > 0 && rect.height > 0 && 
+                                style.display !== 'none' && style.visibility !== 'hidden') {{
+                                hasGenerateButton = true;
+                            }}
+                        }}
+                        if (text === {json.dumps(NEXT_STEP_BUTTON_TEXT)}) {{
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            if (rect.width > 0 && rect.height > 0 && 
+                                style.display !== 'none' && style.visibility !== 'hidden') {{
+                                hasNextButton = true;
+                            }}
+                        }}
+                    }}
+                }}
+                return {{ hasGenerateButton, hasNextButton }};
+            }})()
+            """
+        )
+        
+        # 如果没有"生成图片"按钮且有"下一步"按钮，说明生成完成
+        if not status.get('hasGenerateButton', False) and status.get('hasNextButton', False):
+            logger.info("图片生成完成！")
+            return
+        
+        # 如果还有重试机会
+        if attempt < len(retry_intervals):
+            wait_time = retry_intervals[attempt]
+            logger.info(
+                "图片正在生成中（第 %d 次等待，等待 %d 秒）",
+                attempt + 1,
+                wait_time
+            )
+            time.sleep(wait_time)
+        else:
+            break
+    
+    raise PublishError("图片生成超时，请重试")
+
+
+def _click_next_step_button(page: Page) -> None:
+    """点击"下一步"按钮。"""
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        found = page.evaluate(
+            f"""
+            (() => {{
+                const allElements = document.querySelectorAll('*');
+                for (const el of allElements) {{
+                    if (el.children.length === 0 && el.textContent.trim() === {json.dumps(NEXT_STEP_BUTTON_TEXT)}) {{
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        if (rect.width === 0 || rect.height === 0) continue;
+                        if (rect.left < 0 || rect.top < 0) continue;
+                        if (style.display === 'none' || style.visibility === 'hidden') continue;
+                        el.click();
+                        return 'clicked';
+                    }}
+                }}
+                return 'not_found';
+            }})()
+            """
+        )
+        if found == "clicked":
+            return
+        time.sleep(0.5)
+    raise PublishError(f"没有找到 {NEXT_STEP_BUTTON_TEXT} 按钮")

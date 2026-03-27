@@ -435,6 +435,19 @@ class PublishVideoContent:
     visibility: str = ""  # 公开可见(默认)|仅自己可见|仅互关好友可见
 
 
+@dataclass
+class PublishTextCoverContent:
+    """文字配图发布内容。"""
+
+    cover_text: str = ""  # 文字封面的文字内容
+    title: str = ""
+    content: str = ""
+    tags: list[str] = field(default_factory=list)
+    schedule_time: str | None = None  # ISO8601 格式
+    is_original: bool = False
+    visibility: str = ""  # 公开可见(默认)|仅自己可见|仅互关好友可见
+
+
 # ========== 互动 ==========
 
 

@@ -35,6 +35,7 @@ metadata:
 |--------|------|
 | `fill-publish` | 填写图文表单（不发布） |
 | `fill-publish-video` | 填写视频表单（不发布） |
+| `publish-text-cover` | 文字配图方式一步发布|
 | `publish` | 图文一步发布 |
 | `publish-video` | 视频一步发布 |
 | `click-publish` | 点击发布按钮 |
@@ -207,6 +208,12 @@ python scripts/cli.py save-draft
 #### 一步到位发布（快捷方式）
 
 ```bash
+# 文字配图一步到位
+python scripts/cli.py publish-text-cover \
+  --cover-text-file /tmp/xhs_conver_text.txt \
+  --title-file /tmp/xhs_title.txt \
+  --content-file /tmp/xhs_content.txt
+
 # 图文一步到位
 python scripts/cli.py publish \
   --title-file /tmp/xhs_title.txt \
@@ -331,6 +338,7 @@ python scripts/cli.py click-publish
 
 | 参数 | 说明 |
 |------|------|
+| `--cover-text-file path` | 用于生成封面文字的文件路径（文字配图必须） |
 | `--title-file path` | 标题文件路径（必须） |
 | `--content-file path` | 正文文件路径（必须） |
 | `--images path1 path2` | 图片路径/URL 列表（图文必须） |

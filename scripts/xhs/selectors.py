@@ -95,3 +95,8 @@ SIDEBAR_PROFILE = "div.main-container li.user.side-bar-component a.link-wrapper 
 USER_PROFILE_NAV_LINK = ".main-container .user .link-wrapper a.link-wrapper"
 # 个人主页真实昵称
 USER_NICKNAME = ".user-name"
+
+# ========== 文字配图 ==========
+TEXT_COVER_BUTTON_TEXT = "文字配图"
+GENERATE_IMAGE_BUTTON_TEXT = "生成图片"
+TEXT_COVER_INPUT = "div.tiptap.ProseMirror, div.text-cover-input, textarea.text-cover, [placeholder*='输入文字'], [placeholder*='请输入'], [contenteditable='true']"

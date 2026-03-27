@@ -70,6 +70,7 @@ metadata:
 
 | 命令 | 功能 |
 |------|------|
+| `cli.py publish-text-cover` | 图文发布（本地图片或 URL） |
 | `cli.py publish` | 图文发布（本地图片或 URL） |
 | `cli.py publish-video` | 视频发布 |
 | `publish_pipeline.py` | 发布流水线（含图片下载和登录检查） |
