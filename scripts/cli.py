@@ -869,6 +869,86 @@ def cmd_publish_video(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_publish_text_cover(args: argparse.Namespace) -> None:
+    """发布文字配图内容。"""
+    from xhs.login import check_login_status
+    from xhs.publish import publish_text_cover_content
+    from xhs.types import PublishTextCoverContent
+
+    with open(args.cover_text_file, encoding="utf-8") as f:
+        cover_text = f.read().strip()
+    with open(args.title_file, encoding="utf-8") as f:
+        title = f.read().strip()
+    with open(args.content_file, encoding="utf-8") as f:
+        content = f.read().strip()
+
+    browser, page = _connect(args)
+    try:
+        # headless 模式登录检查 + 自动降级
+        headless = getattr(args, "headless", False)
+        if headless and not check_login_status(page):
+            browser.close_page(page)
+            browser.close()
+            _headless_fallback(args.port)
+            return
+
+        publish_text_cover_content(
+            page,
+            PublishTextCoverContent(
+                cover_text=cover_text,
+                title=title,
+                content=content,
+                tags=args.tags or [],
+                schedule_time=args.schedule_at,
+                is_original=args.original,
+                visibility=args.visibility or "",
+            ),
+        )
+        _output({"success": True, "title": title, "status": "文字配图发布完成"})
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
+def cmd_fill_publish_text_cover(args: argparse.Namespace) -> None:
+    """填写文字配图表单，然后暂存为草稿。"""
+    from xhs.publish import fill_text_cover_publish_form, save_as_draft
+    from xhs.types import PublishTextCoverContent
+
+    with open(args.cover_text_file, encoding="utf-8") as f:
+        cover_text = f.read().strip()
+    with open(args.title_file, encoding="utf-8") as f:
+        title = f.read().strip()
+    with open(args.content_file, encoding="utf-8") as f:
+        content = f.read().strip()
+
+    browser, page = _connect(args)
+    try:
+        fill_text_cover_publish_form(
+            page,
+            PublishTextCoverContent(
+                cover_text=cover_text,
+                title=title,
+                content=content,
+                tags=args.tags or [],
+                schedule_time=args.schedule_at,
+                is_original=args.original,
+                visibility=args.visibility or "",
+            ),
+        )
+        save_as_draft(page)
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "status": "文字配图表单已填写，已暂存到草稿箱",
+            }
+        )
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
 # ========== 账号管理子命令 ==========
 
 
@@ -1101,6 +1181,29 @@ def build_parser() -> argparse.ArgumentParser:
     # save-draft（保存草稿）
     sub = subparsers.add_parser("save-draft", help="保存为草稿（取消发布时使用）")
     sub.set_defaults(func=cmd_save_draft)
+
+    # publish-text-cover（发布文字配图）
+    sub = subparsers.add_parser("publish-text-cover", help="发布文字配图")
+    sub.add_argument("--cover-text-file", required=True, help="文字封面内容文件路径")
+    sub.add_argument("--title-file", required=True, help="标题文件路径")
+    sub.add_argument("--content-file", required=True, help="正文文件路径")
+    sub.add_argument("--tags", nargs="*", help="标签")
+    sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
+    sub.add_argument("--original", action="store_true", help="声明原创")
+    sub.add_argument("--visibility", help="可见范围")
+    sub.add_argument("--headless", action="store_true", help="无头模式（未登录自动降级）")
+    sub.set_defaults(func=cmd_publish_text_cover)
+
+    # fill-publish-text-cover（只填写文字配图表单，不发布）
+    sub = subparsers.add_parser("fill-publish-text-cover", help="填写文字配图表单（不发布）")
+    sub.add_argument("--cover-text-file", required=True, help="文字封面内容文件路径")
+    sub.add_argument("--title-file", required=True, help="标题文件路径")
+    sub.add_argument("--content-file", required=True, help="正文文件路径")
+    sub.add_argument("--tags", nargs="*", help="标签")
+    sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
+    sub.add_argument("--original", action="store_true", help="声明原创")
+    sub.add_argument("--visibility", help="可见范围")
+    sub.set_defaults(func=cmd_fill_publish_text_cover)
 
     # add-account（添加命名账号）
     sub = subparsers.add_parser("add-account", help="添加命名账号，自动分配独立端口")
