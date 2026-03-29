@@ -132,8 +132,8 @@ def _wait_for_initial_state(page: Page, timeout: float = 10.0) -> None:
 
 def _apply_filters(page: Page, filters: list[tuple[int, int]]) -> None:
     """应用筛选条件。"""
-    # 悬停筛选按钮
-    page.hover_element(FILTER_BUTTON)
+    # 点击筛选按钮打开面板
+    page.click_element(FILTER_BUTTON)
 
     # 等待筛选面板出现
     deadline = time.monotonic() + 5.0
