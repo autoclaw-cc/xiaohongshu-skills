@@ -659,6 +659,12 @@ def cmd_get_feed_detail(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_get_share_url(args: argparse.Namespace) -> None:
+    """根据 feed-id 和 xsec-token 生成可分享链接。"""
+    url = f"https://www.xiaohongshu.com/explore/{args.feed_id}?xsec_token={args.xsec_token}&xsec_source=pc_search"
+    _output({"feedId": args.feed_id, "shareUrl": url})
+
+
 def cmd_user_profile(args: argparse.Namespace) -> None:
     """获取用户主页。"""
     from xhs.user_profile import get_user_profile
@@ -1116,6 +1122,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--max-comment-items", type=int, default=0, help="最大评论数 (0=不限)")
     sub.add_argument("--scroll-speed", default="normal", help="滚动速度: slow|normal|fast")
     sub.set_defaults(func=cmd_get_feed_detail)
+
+    # get-share-url
+    sub = subparsers.add_parser("get-share-url", help="生成笔记的可分享链接")
+    sub.add_argument("--feed-id", required=True, help="Feed ID")
+    sub.add_argument("--xsec-token", required=True, help="xsec_token")
+    sub.set_defaults(func=cmd_get_share_url)
 
     # user-profile
     sub = subparsers.add_parser("user-profile", help="获取用户主页")

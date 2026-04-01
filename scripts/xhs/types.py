@@ -139,11 +139,19 @@ class Feed:
             index=d.get("index", 0),
         )
 
+    @property
+    def share_url(self) -> str:
+        """生成可分享的小红书链接。"""
+        if self.id and self.xsec_token:
+            return f"https://www.xiaohongshu.com/explore/{self.id}?xsec_token={self.xsec_token}&xsec_source=pc_search"
+        return ""
+
     def to_dict(self) -> dict:
         """序列化为 JSON 兼容的字典。"""
         result: dict = {
             "id": self.id,
             "xsecToken": self.xsec_token,
+            "shareUrl": self.share_url,
             "modelType": self.model_type,
             "index": self.index,
             "displayTitle": self.note_card.display_title,
