@@ -41,6 +41,11 @@ REPLY_BUTTON = ".right .interactions .reply"
 LIKE_BUTTON = ".interact-container .left .like-lottie"
 COLLECT_BUTTON = ".interact-container .left .reds-icon.collect-icon"
 
+# ========== 关注 ==========
+FOLLOW_BUTTON_WRAPPER = ".author-container .note-detail-follow-btn button.follow-button"
+FOLLOW_BUTTON_TEXT_TO_FOLLOW = "关注"
+FOLLOW_BUTTON_TEXT_FOLLOWED = "已关注"
+
 # ========== 发布页 ==========
 UPLOAD_CONTENT = "div.upload-content"
 CREATOR_TAB = "div.creator-tab"

@@ -13,7 +13,7 @@
 | **xhs-auth** | 认证管理 | 登录检查、扫码登录、手机验证码登录 |
 | **xhs-publish** | 内容发布 | 图文 / 视频 / 长文发布、定时发布、分步预览 |
 | **xhs-explore** | 内容发现 | 关键词搜索、笔记详情、用户主页、首页推荐 |
-| **xhs-interact** | 社交互动 | 评论、回复、点赞、收藏 |
+| **xhs-interact** | 社交互动 | 评论、回复、点赞、收藏、关注 |
 | **xhs-content-ops** | 复合运营 | 竞品分析、热点追踪、批量互动、内容创作 |
 
 支持**连贯操作** — 你可以用自然语言下达复合指令，Agent 会自动串联多个技能完成任务。例如：
@@ -85,7 +85,7 @@ uv sync
 > "帮我发一条图文笔记，标题是…，配图是…"
 
 **社交互动：**
-> "给这条笔记点赞" / "收藏这条帖子" / "评论：写得太好了"
+> "给这条笔记点赞" / "收藏这条帖子" / "关注这个作者" / "评论：写得太好了"
 
 **复合操作：**
 > "搜索竞品账号最近的爆款笔记，分析他们的选题方向"
@@ -134,9 +134,10 @@ python scripts/cli.py publish-video \
   --content-file content.txt \
   --video "/abs/path/video.mp4"
 
-# 点赞 / 收藏 / 评论
+# 点赞 / 收藏 / 关注 / 评论
 python scripts/cli.py like-feed --feed-id FEED_ID --xsec-token XSEC_TOKEN
 python scripts/cli.py favorite-feed --feed-id FEED_ID --xsec-token XSEC_TOKEN
+python scripts/cli.py follow-feed --feed-id FEED_ID --xsec-token XSEC_TOKEN
 python scripts/cli.py post-comment --feed-id FEED_ID --xsec-token XSEC_TOKEN --content "评论内容"
 ```
 
@@ -157,6 +158,7 @@ python scripts/cli.py post-comment --feed-id FEED_ID --xsec-token XSEC_TOKEN --c
 | `reply-comment` | 回复指定评论 |
 | `like-feed` | 点赞 / 取消点赞 |
 | `favorite-feed` | 收藏 / 取消收藏 |
+| `follow-feed` | 关注 / 取消关注作者 |
 | `publish` | 一步发布图文 |
 | `publish-video` | 一步发布视频 |
 | `fill-publish` | 填写图文表单（不发布，供预览） |
@@ -188,6 +190,7 @@ xiaohongshu-skills/
 │   │   ├── user_profile.py         # 用户主页
 │   │   ├── comment.py              # 评论、回复
 │   │   ├── like_favorite.py        # 点赞、收藏
+│   │   ├── follow.py               # 关注
 │   │   ├── publish.py              # 图文发布
 │   │   ├── publish_video.py        # 视频发布
 │   │   ├── publish_long_article.py # 长文发布
