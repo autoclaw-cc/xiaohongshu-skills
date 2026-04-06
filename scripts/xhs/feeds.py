@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 
 from .cdp import Page
 from .errors import NoFeedsError
+from .human import sleep_random
 from .types import Feed
 from .urls import HOME_URL
 
@@ -39,7 +39,7 @@ def list_feeds(page: Page) -> list[Feed]:
     page.navigate(HOME_URL)
     page.wait_for_load()
     page.wait_dom_stable()
-    time.sleep(1)
+    sleep_random(800, 1600)
 
     result = page.evaluate(_EXTRACT_FEEDS_JS)
     if not result:

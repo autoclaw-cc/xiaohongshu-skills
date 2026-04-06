@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 
 from .cdp import Page
 from .errors import NoFeedDetailError
+from .human import sleep_random
 from .selectors import COLLECT_BUTTON, LIKE_BUTTON
 from .types import ActionResult
 from .urls import make_feed_detail_url
@@ -55,7 +55,7 @@ def _prepare_page(page: Page, feed_id: str, xsec_token: str) -> None:
     page.navigate(url)
     page.wait_for_load()
     page.wait_dom_stable()
-    time.sleep(1)
+    sleep_random(1500, 3500)
 
 
 # ========== 点赞 ==========
@@ -90,7 +90,7 @@ def _toggle_like(page: Page, feed_id: str, target_liked: bool) -> ActionResult:
 
     # 点击
     page.click_element(LIKE_BUTTON)
-    time.sleep(3)
+    sleep_random(1500, 3500)
 
     # 验证
     try:
@@ -104,7 +104,7 @@ def _toggle_like(page: Page, feed_id: str, target_liked: bool) -> ActionResult:
     # 重试一次
     logger.warning("feed %s %s可能未成功，重试", feed_id, action_name)
     page.click_element(LIKE_BUTTON)
-    time.sleep(2)
+    sleep_random(900, 1800)
 
     return ActionResult(feed_id=feed_id, success=True, message=f"{action_name}已执行")
 
@@ -141,7 +141,7 @@ def _toggle_favorite(page: Page, feed_id: str, target_collected: bool) -> Action
 
     # 点击
     page.click_element(COLLECT_BUTTON)
-    time.sleep(3)
+    sleep_random(1500, 3500)
 
     # 验证
     try:
@@ -155,6 +155,6 @@ def _toggle_favorite(page: Page, feed_id: str, target_collected: bool) -> Action
     # 重试
     logger.warning("feed %s %s可能未成功，重试", feed_id, action_name)
     page.click_element(COLLECT_BUTTON)
-    time.sleep(2)
+    sleep_random(900, 1800)
 
     return ActionResult(feed_id=feed_id, success=True, message=f"{action_name}已执行")

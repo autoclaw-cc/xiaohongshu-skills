@@ -10,6 +10,7 @@ import time
 
 from .cdp import Page
 from .errors import ContentTooLongError, PublishError, TitleTooLongError, UploadTimeoutError
+from .human import sleep_random
 from .selectors import (
     CONTENT_EDITOR,
     CONTENT_LENGTH_ERROR,
@@ -135,7 +136,7 @@ def click_publish_button(page: Page) -> None:
     )
     if not clicked:
         raise PublishError("未找到发布按钮")
-    time.sleep(3)
+    sleep_random(2500, 4500)
     logger.info("发布完成")
 
 
@@ -156,7 +157,7 @@ def save_as_draft(page: Page) -> None:
         """
     )
     if clicked:
-        time.sleep(2)
+        sleep_random(1500, 2800)
         logger.info("已点击「暂存离开」，内容已保存到草稿箱")
     else:
         logger.warning("未找到「暂存离开」按钮")
@@ -170,9 +171,9 @@ def _navigate_to_publish_page(page: Page) -> None:
     """导航到发布页面。"""
     page.navigate(PUBLISH_URL)
     page.wait_for_load(timeout=300)
-    time.sleep(3)
+    sleep_random(2500, 4000)
     page.wait_dom_stable()
-    time.sleep(2)
+    sleep_random(1500, 2800)
 
 
 def _click_publish_tab(page: Page, tab_name: str) -> None:

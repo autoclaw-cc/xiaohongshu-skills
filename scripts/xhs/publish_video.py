@@ -8,6 +8,7 @@ import time
 
 from .cdp import Page
 from .errors import PublishError, UploadTimeoutError
+from .human import sleep_random
 from .publish import (
     _click_publish_tab,
     _find_content_element,
@@ -61,7 +62,7 @@ def fill_publish_video_form(page: Page, content: PublishVideoContent) -> None:
 
     # 点击"上传视频" TAB
     _click_publish_tab(page, "上传视频")
-    time.sleep(1)
+    sleep_random(800, 1500)
 
     # 上传视频
     _upload_video(page, content.video_path)
@@ -85,7 +86,7 @@ def click_publish_video_button(page: Page) -> None:
     """
     _wait_for_publish_button_clickable(page)
     page.click_element(PUBLISH_BUTTON)
-    time.sleep(3)
+    sleep_random(2500, 4500)
     logger.info("视频发布完成")
 
 
@@ -142,19 +143,19 @@ def _fill_publish_video_form(
     """填写视频表单（不点击发布）。"""
     # 标题
     page.input_text(TITLE_INPUT, title)
-    time.sleep(1)
+    sleep_random(800, 1500)
 
     # 正文 + 标签
     content_selector = _find_content_element(page)
     page.input_content_editable(content_selector, content)
 
     # 回点标题
-    time.sleep(1)
+    sleep_random(600, 1200)
     page.click_element(TITLE_INPUT)
 
     if tags:
         _input_tags(page, content_selector, tags)
-    time.sleep(1)
+    sleep_random(600, 1400)
 
     # 定时发布
     if schedule_time:
