@@ -233,6 +233,30 @@ def _click_publish_tab(page: Page, tab_name: str) -> None:
             _remove_pop_cover(page)
 
         time.sleep(0.2)
+        
+        # 兜底策略: 如果还没找到，尝试强行点击可见的上传图文DOM元素
+        found_fallback = page.evaluate(
+            f"""
+            (() => {{
+                let tabs = document.querySelectorAll({json.dumps(CREATOR_TAB)});
+                for (const tab of tabs) {{
+                    const titleSpan = tab.querySelector('span.title');
+                    const tabText = titleSpan ? titleSpan.textContent.trim() : tab.textContent.trim();
+                    if (tabText === {json.dumps(tab_name)}) {{
+                        const rect = tab.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {{
+                           tab.click();
+                           return 'clicked';
+                        }}
+                    }}
+                }}
+                return 'not_found';
+            }})()
+            """
+        )
+        if found_fallback == 'clicked':
+            return
+        time.sleep(0.5)
 
     # 调试：输出页面信息
     debug_info = page.evaluate("""
