@@ -14,6 +14,9 @@
     "https://www.xiaohongshu.com/*",
     "https://xiaohongshu.com/*",
     "https://creator.xiaohongshu.com/*",
+    "https://www.rednote.com/*",
+    "https://rednote.com/*",
+    "https://creator.rednote.com/*",
     "ws://localhost/*"
   ],
   "background": {
@@ -24,7 +27,10 @@
       "matches": [
         "https://www.xiaohongshu.com/*",
         "https://xiaohongshu.com/*",
-        "https://creator.xiaohongshu.com/*"
+        "https://creator.xiaohongshu.com/*",
+        "https://www.rednote.com/*",
+        "https://rednote.com/*",
+        "https://creator.rednote.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"
