@@ -517,15 +517,17 @@ function domExecutor(method, params) {
 // ───────────────────────── Tab 管理 ─────────────────────────
 
 async function getOrOpenXhsTab() {
-  const tabs = await chrome.tabs.query({
-    url: [
-      "https://www.xiaohongshu.com/*",
-      "https://xiaohongshu.com/*",
-      "https://creator.xiaohongshu.com/*",
-    ],
-  });
+  const xhsUrls = [
+    "https://www.xiaohongshu.com/*",
+    "https://xiaohongshu.com/*",
+    "https://creator.xiaohongshu.com/*",
+    "https://www.rednote.com/*",
+    "https://rednote.com/*",
+    "https://creator.rednote.com/*",
+  ];
+  const tabs = await chrome.tabs.query({ url: xhsUrls });
   if (tabs.length > 0) return tabs[0];
-  // 没有已打开的 XHS 页面，新建一个
+  // 没有已打开的 XHS/RedNote 页面，新建一个
   const tab = await chrome.tabs.create({ url: "https://www.xiaohongshu.com/" });
   await waitForTabComplete(tab.id, null, 30000);
   return tab;

@@ -131,8 +131,8 @@ def _wait_for_initial_state(page: Page, timeout: float = 10.0) -> None:
 
 
 def _apply_filters(page: Page, filters: list[tuple[int, int]]) -> None:
-    """应用筛选条件。"""
-    # 悬停筛选按钮
+    """应用筛选条件（使用文本匹配，兼容 rednote.com DOM 差异）。"""
+    # 悬停筛选按钮打开面板
     page.hover_element(FILTER_BUTTON)
 
     # 等待筛选面板出现
@@ -142,13 +142,58 @@ def _apply_filters(page: Page, filters: list[tuple[int, int]]) -> None:
             break
         sleep_random(300, 600)
 
-    # 点击各筛选项
+    # 点击各筛选项（通过文本内容匹配，而非 nth-child 索引）
     for filters_index, tags_index in filters:
-        selector = (
-            f"div.filter-panel div.filters:nth-child({filters_index}) "
-            f"div.tags:nth-child({tags_index})"
+        options = _FILTER_OPTIONS.get(filters_index)
+        if not options:
+            continue
+        # 从映射表查找对应文本标签
+        option_text = None
+        for ti, text in options:
+            if ti == tags_index:
+                option_text = text
+                break
+        if not option_text:
+            continue
+
+        # JS 在筛选面板中查找包含指定文本的标签元素
+        box = page.evaluate(
+            f"""
+            (() => {{
+                const panel = document.querySelector({json.dumps(FILTER_PANEL)});
+                if (!panel) return null;
+                // 兼容多种 DOM 结构：div.filters / div.filter-group / [class*=filter]
+                const groups = panel.querySelectorAll(
+                    'div.filters, div.filter-group, [class*="filter-group"]'
+                );
+                const gi = {filters_index} - 1;
+                if (gi < 0 || gi >= groups.length) return null;
+                const group = groups[gi];
+                // 兼容多种标签元素
+                const tags = group.querySelectorAll(
+                    'div.tag, div.tags, span.tag, span.tags, [class*="tag"]'
+                );
+                for (const tag of tags) {{
+                    const t = (tag.textContent || '').trim();
+                    if (t === {json.dumps(option_text)}) {{
+                        tag.scrollIntoView({{block: 'center'}});
+                        const r = tag.getBoundingClientRect();
+                        return {{x: r.left + r.width / 2, y: r.top + r.height / 2}};
+                    }}
+                }}
+                return null;
+            }})()
+            """
         )
-        page.click_element(selector)
+        if not box:
+            logger.warning("未找到筛选项: 组%d 标签'%s'", filters_index, option_text)
+            continue
+
+        x = box["x"] + random.uniform(-3, 3)
+        y = box["y"] + random.uniform(-3, 3)
+        page.mouse_move(x, y)
+        time.sleep(random.uniform(0.03, 0.08))
+        page.mouse_click(x, y)
         sleep_random(300, 600)
 
     # 等待页面更新

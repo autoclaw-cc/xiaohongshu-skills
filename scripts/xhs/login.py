@@ -30,7 +30,7 @@ from .selectors import (
     USER_NICKNAME,
     USER_PROFILE_NAV_LINK,
 )
-from .urls import EXPLORE_URL
+from .urls import EXPLORE_URL, _BASE
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def get_current_user_nickname(page: Page) -> str:
             return ""
 
         # 导航到个人主页读取真实昵称
-        profile_url = f"https://www.xiaohongshu.com{profile_href}"
+        profile_url = f"https://www.{_BASE}{profile_href}"
         page.navigate(profile_url)
         page.wait_for_load()
         page.wait_dom_stable()
