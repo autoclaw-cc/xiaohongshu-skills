@@ -34,6 +34,14 @@ from .selectors import (
 from .types import PublishImageContent
 from .urls import PUBLISH_URL
 
+# Patch #5: title_utils 位于 scripts/ 根目录（非 xhs 包），提升到 module-level 可在加载期暴露 path 问题，
+# 避免填表流程走到一半才 crash。如果 scripts/ 不在 sys.path（比如直接测试 xhs 包），
+# 回退到 lazy import 保持向后兼容。
+try:
+    from title_utils import calc_title_length as _calc_title_length  # type: ignore[import-not-found]
+except ImportError:
+    _calc_title_length = None  # 运行时 fallback lazy import，见 _fill_publish_form
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,7 +184,13 @@ def _navigate_to_publish_page(page: Page) -> None:
 
 
 def _click_publish_tab(page: Page, tab_name: str) -> None:
-    """点击发布页 TAB（上传图文/上传视频）。"""
+    """点击发布页 TAB（上传图文/上传视频）。
+
+    流程：
+    1. 策略1：精准匹配 div.creator-tab + span.title（首选路径）
+    2. 策略2：fallback 到 tab 容器内文本匹配（兼容 DOM 结构变化）
+    3. 点击后验证：轮询文件上传 input 出现（最多 2s），确认 TAB 真的切换了
+    """
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         # 查找匹配的 TAB（支持多种结构）
@@ -195,38 +209,67 @@ def _click_publish_tab(page: Page, tab_name: str) -> None:
                         if (rect.width === 0 || rect.height === 0) continue;
                         if (rect.left < 0 || rect.top < 0) continue;
                         if (style.display === 'none' || style.visibility === 'hidden') continue;
+                        if (parseFloat(style.opacity) < 0.1) continue;
                         const x = rect.left + rect.width / 2;
                         const y = rect.top + rect.height / 2;
                         const target = document.elementFromPoint(x, y);
                         if (target === tab || tab.contains(target)) {{
                             tab.click();
-                            return 'clicked';
+                            return 'clicked_1';
                         }}
-                        return 'blocked';
+                        continue;
                     }}
                 }}
-                
-                // 策略2: 查找任意包含目标文本的元素
-                const allElements = document.querySelectorAll('*');
-                for (const el of allElements) {{
-                    if (el.children.length === 0 && el.textContent.trim() === {json.dumps(tab_name)}) {{
+
+                // 策略2: 仅在 tab 容器内查找匹配文本（避免误点 tooltip/breadcrumb/hidden 节点）
+                const tabContainers = document.querySelectorAll(
+                    '.header-tabs, .creator-tabs, [role="tablist"]'
+                );
+                for (const container of tabContainers) {{
+                    const candidates = container.querySelectorAll('*');
+                    for (const el of candidates) {{
+                        if (el.children.length !== 0) continue;
+                        if (el.textContent.trim() !== {json.dumps(tab_name)}) continue;
                         const rect = el.getBoundingClientRect();
                         const style = window.getComputedStyle(el);
                         if (rect.width === 0 || rect.height === 0) continue;
                         if (rect.left < 0 || rect.top < 0) continue;
                         if (style.display === 'none' || style.visibility === 'hidden') continue;
-                        el.click();
-                        return 'clicked';
+                        if (parseFloat(style.opacity) < 0.1) continue;
+                        // 向上找可点击的 tab 容器（span.title 的父级通常是 creator-tab）
+                        const clickTarget = el.closest('.creator-tab') || el;
+                        clickTarget.click();
+                        return 'clicked_2';
                     }}
                 }}
-                
+
                 return 'not_found';
             }})()
             """
         )
 
-        if found == "clicked":
-            return
+        if found == "clicked_1" or found == "clicked_2":
+            # Patch #2: 标记哪个策略命中（便于排查 DOM 变更）
+            if found == "clicked_2":
+                logger.warning(
+                    "_click_publish_tab 策略1失败，fallback 到策略2命中 tab=%s — "
+                    "XHS DOM 可能已变更，建议检查 div.creator-tab 结构",
+                    tab_name,
+                )
+            # Patch #1: 点击后验证 TAB 真的切换了（文件上传 input 会出现）
+            verify_deadline = time.monotonic() + 2.0
+            while time.monotonic() < verify_deadline:
+                if page.has_element(UPLOAD_INPUT) or page.has_element(FILE_INPUT):
+                    return
+                time.sleep(0.1)
+            # 点击没生效（ghost layer 吸走了事件 / TAB 还没 mount 内容）
+            logger.warning(
+                "_click_publish_tab 点击后 2s 内未检测到文件 input，继续重试 (strategy=%s)",
+                found,
+            )
+            # 不 return，继续下一轮循环尝试
+            time.sleep(0.3)
+            continue
 
         if found == "blocked":
             # 尝试移除弹窗
@@ -247,7 +290,43 @@ def _click_publish_tab(page: Page, tab_name: str) -> None:
         })()
     """)
     logger.error("调试信息: %s", debug_info)
+    # Patch #3: 保存完整 DOM 快照便于事后分析
+    _dump_dom_snapshot(page, reason=f"tab_not_found_{tab_name}")
     raise PublishError(f"没有找到发布 TAB - {tab_name}")
+
+
+def _dump_dom_snapshot(page: Page, reason: str) -> None:
+    """在 PublishError 前保存 DOM 快照 + URL，便于事后排查（Patch #3）。
+
+    输出到 /tmp/xhs_debug_{timestamp}_{reason}.html，不影响主流程（所有异常都吞掉）。
+    """
+    try:
+        from datetime import datetime
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_reason = re.sub(r"[^\w-]", "_", reason)[:40]
+        path = f"/tmp/xhs_debug_{ts}_{safe_reason}.html"
+
+        snapshot = page.evaluate("""
+            (() => {
+                return JSON.stringify({
+                    url: window.location.href,
+                    title: document.title,
+                    viewport: {w: window.innerWidth, h: window.innerHeight},
+                    html: document.documentElement.outerHTML
+                });
+            })()
+        """)
+        data = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"<!-- URL: {data.get('url')} -->\n")
+            f.write(f"<!-- Title: {data.get('title')} -->\n")
+            f.write(f"<!-- Viewport: {data.get('viewport')} -->\n")
+            f.write(f"<!-- Reason: {reason} -->\n")
+            f.write(data.get("html", ""))
+        logger.error("DOM 快照已保存: %s", path)
+    except Exception as e:  # noqa: BLE001 — 快照失败不能影响主流程的原始异常
+        logger.warning("保存 DOM 快照失败: %s", e)
 
 
 def _remove_pop_cover(page: Page) -> None:
@@ -340,9 +419,12 @@ def _fill_publish_form(
     content, tags = _extract_hashtags_from_content(content, tags)
 
     # 标题——填写前先校验长度，超限直接报错（由 AI 重新生成标题）
-    from title_utils import calc_title_length
-
-    title_len = calc_title_length(title)
+    # Patch #5: 优先用 module-level import；加载失败时 lazy import 兜底（保持向后兼容）
+    if _calc_title_length is not None:
+        title_len = _calc_title_length(title)
+    else:
+        from title_utils import calc_title_length  # type: ignore[import-not-found]
+        title_len = calc_title_length(title)
     if title_len > 20:
         raise TitleTooLongError(str(title_len), "20")
 
@@ -354,7 +436,7 @@ def _fill_publish_form(
 
     # 正文
     content_selector = _find_content_element(page)
-    page.input_content_editable(content_selector, content)
+    _insert_content_into_editor(page, content_selector, content)
 
     # 回点标题（增强稳定性）
     time.sleep(1)
@@ -384,6 +466,107 @@ def _fill_publish_form(
             logger.warning("设置原创声明失败: %s", e)
 
     logger.info("表单填写完成，等待确认发布")
+
+
+def _insert_content_into_editor(page: Page, selector: str, text: str) -> None:
+    """把正文插入到富文本编辑器。
+
+    Fast path: 对 Tiptap/ProseMirror 编辑器用 ClipboardEvent('paste') 单事务插入。
+    背景：`page.input_content_editable` 在 content.js 里按行 `execCommand('insertText')`，
+    每行触发 ProseMirror 一次 transaction，>600 字时累计延迟超过 bridge 90s 硬超时。
+    Paste 事件走 ProseMirror 的 paste handler，整块文本单次 transaction，通常 <1s。
+
+    Slow path: 非 Tiptap 编辑器（老 UI/Quill）走原逐行路径，保持兼容。
+    """
+    # 探测编辑器类型
+    editor_class = page.evaluate(
+        f"""
+        (() => {{
+            const el = document.querySelector({json.dumps(selector)});
+            if (!el) return '';
+            // tiptap 可能在 selector 的后代上
+            if (el.classList && el.classList.contains('tiptap')) return 'tiptap';
+            const tiptap = el.querySelector('.tiptap') || el.closest('.tiptap');
+            if (tiptap) return 'tiptap';
+            return el.className || 'unknown';
+        }})()
+        """
+    )
+
+    is_tiptap = isinstance(editor_class, str) and "tiptap" in editor_class.lower()
+
+    if not is_tiptap:
+        logger.info("编辑器类型 %s，走逐行 insertText 路径", editor_class)
+        page.input_content_editable(selector, text)
+        return
+
+    # Tiptap fast path
+    logger.info("检测到 Tiptap/ProseMirror，走 ClipboardEvent paste 快速路径")
+    expected_textlen = len(text.replace("\n", ""))  # textContent 不含 \n
+
+    result = page.evaluate(
+        f"""
+        (() => {{
+            const root = document.querySelector({json.dumps(selector)});
+            const editor = (root && root.classList && root.classList.contains('tiptap'))
+                ? root
+                : (root && root.querySelector('.tiptap')) || document.querySelector('.tiptap');
+            if (!editor) return 'no_editor';
+
+            editor.focus();
+
+            // 清空：selectAll + 多次 delete 处理 ProseMirror 顽固状态
+            const sel = window.getSelection();
+            const r1 = document.createRange();
+            r1.selectNodeContents(editor);
+            sel.removeAllRanges();
+            sel.addRange(r1);
+            for (let i = 0; i < 10; i++) document.execCommand('delete', false, null);
+
+            // 光标归位到开头
+            const r2 = document.createRange();
+            r2.selectNodeContents(editor);
+            r2.collapse(true);
+            const s2 = window.getSelection();
+            s2.removeAllRanges();
+            s2.addRange(r2);
+
+            // 单次 paste 事件
+            const dt = new DataTransfer();
+            dt.setData('text/plain', {json.dumps(text)});
+            const ev = new ClipboardEvent('paste', {{
+                clipboardData: dt,
+                bubbles: true,
+                cancelable: true
+            }});
+            editor.dispatchEvent(ev);
+
+            return {{
+                text_len: editor.textContent.length,
+                html_len: editor.innerHTML.length
+            }};
+        }})()
+        """
+    )
+
+    if result == "no_editor":
+        logger.warning("Tiptap 快速路径找不到编辑器，回退到逐行 insertText")
+        page.input_content_editable(selector, text)
+        return
+
+    actual_len = result.get("text_len", 0) if isinstance(result, dict) else 0
+    # 允许 ±10% 误差（表情/零宽字符的 length 会略有差异）
+    if actual_len < expected_textlen * 0.9:
+        logger.warning(
+            "Tiptap paste 后字数不匹配 (expected~%d, got %d)，回退到逐行 insertText",
+            expected_textlen,
+            actual_len,
+        )
+        page.input_content_editable(selector, text)
+        return
+
+    logger.info("Tiptap paste 成功，text_len=%d", actual_len)
+    time.sleep(0.3)
 
 
 def _find_content_element(page: Page) -> str:
@@ -537,7 +720,11 @@ def _input_single_tag(page: Page, content_selector: str, tag: str) -> None:
 
 
 def _set_schedule_publish(page: Page, schedule_time: str) -> None:
-    """设置定时发布。"""
+    """设置定时发布。
+
+    Patch #4: 点击 SCHEDULE_SWITCH 后轮询 DATETIME_INPUT，确认开关真的生效 —
+    避免 switch 被遮挡/失败但静默往输入框写值时报出误导性错误。
+    """
     from datetime import datetime
 
     # 解析 ISO8601 时间
@@ -549,6 +736,18 @@ def _set_schedule_publish(page: Page, schedule_time: str) -> None:
     # 点击定时发布开关
     page.click_element(SCHEDULE_SWITCH)
     time.sleep(0.8)
+
+    # Patch #4: 验证 DATETIME_INPUT 已出现（开关展开成功）
+    verify_deadline = time.monotonic() + 3.0
+    while time.monotonic() < verify_deadline:
+        if page.has_element(DATETIME_INPUT):
+            break
+        time.sleep(0.1)
+    else:
+        _dump_dom_snapshot(page, reason="schedule_switch_no_datetime_input")
+        raise PublishError(
+            "点击定时发布开关后 3s 内未出现时间输入框，开关可能被遮挡或 DOM 已变更"
+        )
 
     # 设置日期时间
     datetime_str = dt.strftime("%Y-%m-%d %H:%M")
