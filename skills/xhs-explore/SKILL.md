@@ -107,6 +107,11 @@ python scripts/cli.py search-feeds \
 - `feeds`：笔记列表，每项包含 `id`、`xsec_token`、`note_card`（标题、封面、用户信息、互动数据）
 - `count`：结果数量
 
+### 防风控策略
+
+> **必须遵守 `xhs-risk-control` 技能中的所有风控规则。**
+> 涉及多关键词搜索、批量获取详情时，先加载 xhs-risk-control 获取具体的节奏控制参数。
+
 ### 获取笔记详情
 
 从搜索结果或首页 Feed 中取 `id` 和 `xsec_token`，获取完整内容：
@@ -141,28 +146,6 @@ python scripts/cli.py get-feed-detail \
 
 输出包含：笔记完整内容、图片列表、互动数据、评论列表。
 
-### 批量获取详情的防风控策略
-
-**重要**：小红书会在同一 session 连续访问 4~5 篇详情后触发扫码验证（风控机制）。
-批量获取时必须每 3 篇插入一次随机等待，模拟人类阅读节奏。
-
-```bash
-# 正确做法：每 3 篇后 sleep 10~20 秒
-python scripts/cli.py get-feed-detail --feed-id ID1 --xsec-token TOKEN1 && \
-python scripts/cli.py get-feed-detail --feed-id ID2 --xsec-token TOKEN2 && \
-python scripts/cli.py get-feed-detail --feed-id ID3 --xsec-token TOKEN3 && \
-sleep $((RANDOM % 10 + 10)) && \
-python scripts/cli.py get-feed-detail --feed-id ID4 --xsec-token TOKEN4 && \
-python scripts/cli.py get-feed-detail --feed-id ID5 --xsec-token TOKEN5 && \
-python scripts/cli.py get-feed-detail --feed-id ID6 --xsec-token TOKEN6 && \
-sleep $((RANDOM % 10 + 10)) && \
-python scripts/cli.py get-feed-detail --feed-id ID7 --xsec-token TOKEN7
-```
-
-- 每组不超过 3 篇
-- 组间等待 10~20 秒（用 `$((RANDOM % 10 + 10))` 随机化）
-- 不要把所有命令无间隔地串在一起
-
 ### 获取用户主页
 
 ```bash
@@ -189,11 +172,53 @@ python scripts/cli.py user-profile \
 - **笔记不可访问**：可能是私密笔记或已删除，提示用户。
 - **用户主页不可访问**：用户可能已注销或设置隐私。
 
-## 风控数据 (NetLog)
+## 风控策略（强制 - 内联规则，必须遵守）
 
-如需了解当前会话被 XHS 检测的维度，可调用：
+> **以下规则强制执行，违反将导致账号被风控。不得以"提高效率"为由跳过任何规则。**
 
+### 多关键词搜索
+
+| 规则 | 值 |
+|------|-----|
+| 两次搜索最小间隔 | 30秒~1分30秒 |
+| 单 session 搜索上限 | 5~6次 |
+| 每次搜索后 | 必须插入至少一个非搜索操作（list-feeds 或 get-feed-detail） |
+| sleep 时间 | 必须随机化，禁止固定值 |
+| **禁止并行搜索** | 多个关键词必须串行执行，严禁并行调用 |
+
+### 批量获取详情
+
+| 规则 | 值 |
+|------|-----|
+| 搜索完成后首次获取详情 | 等待 5~10 秒 |
+| 每篇详情之间间隔 | 20~60 秒 |
+| 每 3 篇后额外等待 | 15~30 秒 |
+| 随机滚动 | 每篇有 30% 几率插入一次 list-feeds |
+| 单次 session 详情上限 | 5 篇 |
+| **禁止并行获取详情** | 必须串行，严禁同时打开多个详情页 |
+| 禁止两篇详情间隔 < 20秒 | 强制 |
+
+### 执行方式
+
+```bash
+# 正确：串行搜索，带间隔
+python scripts/cli.py search-feeds --keyword "关键词A" ...
+sleep $((RANDOM % 60 + 30))
+python scripts/cli.py search-feeds --keyword "关键词B" ...
+
+# 正确：串行详情，带间隔
+python scripts/cli.py get-feed-detail --feed-id ID1 --xsec-token TOKEN1
+sleep $((RANDOM % 40 + 20))
+python scripts/cli.py get-feed-detail --feed-id ID2 --xsec-token TOKEN2
+```
+
+### 风控触发后恢复
+
+- 搜索返回"没有捕获到 feeds 数据"：等待 30~40 分钟再重试
+- 详情返回"没有捕获到 feed 详情数据"：等待 10~15 分钟
+- 运行 `python scripts/cli.py risk-report` 检查当前风险等级
+
+### 诊断工具
+
+- `python scripts/cli.py risk-report` —— 生成结构化风控报告
 - `python scripts/cli.py get-netlog [--limit N]` —— 获取原始 entries
-- `python scripts/cli.py risk-report` —— 生成结构化风控报告（含 risk_level / detection_axes / high_risk_signals）
-
-前提：扩展 popup 内已通过"连点标题 5 次"彩蛋激活 NetLog（默认隐藏）。
