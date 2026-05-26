@@ -40,6 +40,7 @@ metadata:
 | `post-comment` | 发表评论（需用户确认） |
 | `like-feed` | 点赞笔记 |
 | `favorite-feed` | 收藏笔记 |
+| `follow-feed` | 关注作者 |
 | `publish` | 图文发布（需用户确认） |
 | `fill-publish` | 填写图文表单（分步发布） |
 | `click-publish` | 点击发布按钮 |
@@ -146,7 +147,7 @@ python scripts/cli.py publish \
 
 ### 互动管理
 
-目标：浏览目标笔记 → 有策略地评论/点赞/收藏。
+目标：浏览目标笔记 → 有策略地评论/点赞/收藏/关注。
 
 **步骤：**
 
@@ -170,12 +171,15 @@ python scripts/cli.py post-comment \
   --xsec-token XSEC_TOKEN \
   --content "评论内容"
 ```
-7. 可选：点赞或收藏：
+7. 可选：点赞、收藏或关注：
 ```bash
 python scripts/cli.py like-feed \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 
 python scripts/cli.py favorite-feed \
+  --feed-id FEED_ID --xsec-token XSEC_TOKEN
+
+python scripts/cli.py follow-feed \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 ```
 8. 每次互动之间保持 30-60 秒间隔。

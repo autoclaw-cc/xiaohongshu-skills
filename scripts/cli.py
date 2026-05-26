@@ -278,7 +278,9 @@ def cmd_wait_login(args: argparse.Namespace) -> None:
         _output(
             {
                 "logged_in": success,
-                "message": "登录成功" if success else "等待超时，请重新运行 get-qrcode 获取新二维码",
+                "message": "登录成功"
+                if success
+                else "等待超时，请重新运行 get-qrcode 获取新二维码",
             },
             exit_code=0 if success else 2,
         )
@@ -324,13 +326,15 @@ def cmd_send_code(args: argparse.Namespace) -> None:
         if not sent:
             _output({"logged_in": True, "message": "已登录，无需重新登录"})
             return
-        _output({
-            "status": "code_sent",
-            "message": (
-                f"验证码已发送至 {args.phone[:3]}****{args.phone[-4:]}，"
-                "请运行 verify-code --code <验证码>"
-            ),
-        })
+        _output(
+            {
+                "status": "code_sent",
+                "message": (
+                    f"验证码已发送至 {args.phone[:3]}****{args.phone[-4:]}，"
+                    "请运行 verify-code --code <验证码>"
+                ),
+            }
+        )
     except RateLimitError:
         _qrcode_fallback(browser, page, args)
     finally:
@@ -517,6 +521,21 @@ def cmd_favorite_feed(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_follow_feed(args: argparse.Namespace) -> None:
+    """关注/取消关注笔记作者。"""
+    from xhs.follow import follow_feed, unfollow_feed
+
+    browser, page = _connect(args)
+    try:
+        if args.unfollow:
+            result = unfollow_feed(page, args.feed_id, args.xsec_token)
+        else:
+            result = follow_feed(page, args.feed_id, args.xsec_token)
+        _output(result.to_dict())
+    finally:
+        browser.close()
+
+
 def cmd_publish(args: argparse.Namespace) -> None:
     """发布图文内容。"""
     from image_downloader import process_images
@@ -580,7 +599,14 @@ def cmd_fill_publish(args: argparse.Namespace) -> None:
                 visibility=args.visibility or "",
             ),
         )
-        _output({"success": True, "title": title, "images": len(image_paths), "status": "表单已填写，等待确认发布"})
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "images": len(image_paths),
+                "status": "表单已填写，等待确认发布",
+            }
+        )
     finally:
         browser.close()
 
@@ -608,7 +634,14 @@ def cmd_fill_publish_video(args: argparse.Namespace) -> None:
                 visibility=args.visibility or "",
             ),
         )
-        _output({"success": True, "title": title, "video": args.video, "status": "视频表单已填写，等待确认发布"})
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "video": args.video,
+                "status": "视频表单已填写，等待确认发布",
+            }
+        )
     finally:
         browser.close()
 
@@ -940,6 +973,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--xsec-token", required=True)
     sub.add_argument("--unfavorite", action="store_true")
     sub.set_defaults(func=cmd_favorite_feed)
+
+    # follow-feed
+    sub = subparsers.add_parser("follow-feed", help="关注/取消关注作者")
+    sub.add_argument("--feed-id", required=True)
+    sub.add_argument("--xsec-token", required=True)
+    sub.add_argument("--unfollow", action="store_true")
+    sub.set_defaults(func=cmd_follow_feed)
 
     # publish
     sub = subparsers.add_parser("publish", help="发布图文")

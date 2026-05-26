@@ -67,6 +67,7 @@ python scripts/cli.py publish --title-file t.txt --content-file c.txt --images p
 | `reply-comment` | reply_comment_in_feed | 互动 |
 | `like-feed` | like_feed | 互动 |
 | `favorite-feed` | favorite_feed | 互动 |
+| `follow-feed` | — | 互动 |
 | `publish` | publish_content | 发布 |
 | `publish-video` | publish_with_video | 发布 |
 | `fill-publish` | — | 分步发布（图文填写） |

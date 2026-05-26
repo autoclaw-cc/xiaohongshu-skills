@@ -2,7 +2,7 @@
 name: xiaohongshu-skills
 description: |
   小红书自动化技能集合。支持认证登录、内容发布、搜索发现、社交互动、复合运营。
-  当用户要求操作小红书（发布、搜索、评论、登录、分析、点赞、收藏）时触发。
+  当用户要求操作小红书（发布、搜索、评论、登录、分析、点赞、收藏、关注）时触发。
 version: 1.0.0
 metadata:
   openclaw:
@@ -39,7 +39,7 @@ metadata:
 1. **认证相关**（"登录 / 检查登录 / 切换账号"）→ 执行 `xhs-auth` 技能。
 2. **内容发布**（"发布 / 发帖 / 上传图文 / 上传视频"）→ 执行 `xhs-publish` 技能。
 3. **搜索发现**（"搜索笔记 / 查看详情 / 浏览首页 / 查看用户"）→ 执行 `xhs-explore` 技能。
-4. **社交互动**（"评论 / 回复 / 点赞 / 收藏"）→ 执行 `xhs-interact` 技能。
+4. **社交互动**（"评论 / 回复 / 点赞 / 收藏 / 关注"）→ 执行 `xhs-interact` 技能。
 5. **复合运营**（"竞品分析 / 热点追踪 / 批量互动 / 一键创作"）→ 执行 `xhs-content-ops` 技能。
 
 ## 全局约束
@@ -87,7 +87,7 @@ metadata:
 
 ### xhs-interact — 社交互动
 
-发表评论、回复、点赞、收藏。
+发表评论、回复、点赞、收藏、关注。
 
 | 命令 | 功能 |
 |------|------|
@@ -95,6 +95,7 @@ metadata:
 | `cli.py reply-comment` | 回复指定评论 |
 | `cli.py like-feed` | 点赞 / 取消点赞 |
 | `cli.py favorite-feed` | 收藏 / 取消收藏 |
+| `cli.py follow-feed` | 关注 / 取消关注 |
 
 ### xhs-content-ops — 复合运营
 
@@ -133,6 +134,10 @@ python scripts/cli.py post-comment \
 
 # 8. 点赞
 python scripts/cli.py like-feed \
+  --feed-id FEED_ID --xsec-token XSEC_TOKEN
+
+# 9. 关注
+python scripts/cli.py follow-feed \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 ```
 
