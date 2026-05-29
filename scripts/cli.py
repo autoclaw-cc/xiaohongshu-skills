@@ -398,6 +398,19 @@ def cmd_search_feeds(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_get_notifications(args: argparse.Namespace) -> None:
+    """获取评论/回复通知。"""
+    from xhs.notifications import get_notifications
+
+    browser, page = _connect(args)
+    try:
+        result = get_notifications(page, num=args.num)
+        _output(result.to_dict())
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
 def cmd_get_feed_detail(args: argparse.Namespace) -> None:
     """获取 Feed 详情。"""
     from xhs.feed_detail import get_feed_detail
@@ -892,6 +905,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--search-scope", help="范围: 不限|已看过|未看过|已关注")
     sub.add_argument("--location", help="位置: 不限|同城|附近")
     sub.set_defaults(func=cmd_search_feeds)
+
+    # get-notifications
+    sub = subparsers.add_parser("get-notifications", help="获取评论/回复通知")
+    sub.add_argument("--num", type=int, default=20, help="获取条数 (default: 20；受页面单批加载限制，最多返回20条，超出部分静默截断)")
+    sub.set_defaults(func=cmd_get_notifications)
 
     # get-feed-detail
     sub = subparsers.add_parser("get-feed-detail", help="获取 Feed 详情")
