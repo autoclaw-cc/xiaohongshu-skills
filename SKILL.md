@@ -81,8 +81,9 @@ metadata:
 | 命令 | 功能 |
 |------|------|
 | `cli.py list-feeds` | 获取首页推荐 Feed |
-| `cli.py search-feeds` | 关键词搜索笔记 |
+| `cli.py search-feeds` | 关键词搜索笔记（返回含 shareUrl） |
 | `cli.py get-feed-detail` | 获取笔记完整内容和评论 |
+| `cli.py get-share-url` | 根据 feed-id + xsec-token 生成可分享链接 |
 | `cli.py user-profile` | 获取用户主页信息 |
 
 ### xhs-interact — 社交互动
@@ -119,19 +120,23 @@ python scripts/cli.py search-feeds --keyword "关键词"
 python scripts/cli.py get-feed-detail \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 
-# 6. 发布图文
+# 6. 获取可分享链接
+python scripts/cli.py get-share-url \
+  --feed-id FEED_ID --xsec-token XSEC_TOKEN
+
+# 7. 发布图文
 python scripts/cli.py publish \
   --title-file title.txt \
   --content-file content.txt \
   --images "/abs/path/pic1.jpg"
 
-# 7. 发表评论
+# 8. 发表评论
 python scripts/cli.py post-comment \
   --feed-id FEED_ID \
   --xsec-token XSEC_TOKEN \
   --content "评论内容"
 
-# 8. 点赞
+# 9. 点赞
 python scripts/cli.py like-feed \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 ```
