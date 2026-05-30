@@ -9,7 +9,12 @@ from pathlib import Path
 
 from .cdp import Page
 from .errors import PublishError
-from .publish import _click_publish_tab, _find_content_element, _navigate_to_publish_page
+from .publish import (
+    _click_publish_tab,
+    _find_best_editable_element,
+    _find_content_element,
+    _navigate_to_publish_page,
+)
 from .selectors import (
     AUTO_FORMAT_BUTTON_TEXT,
     CONTENT_EDITOR,
@@ -182,18 +187,31 @@ def _click_new_creation(page: Page) -> None:
 
 def _fill_long_title(page: Page, title: str) -> None:
     """填写长文标题（textarea，需使用 native setter）。"""
-    page.wait_for_element(LONG_ARTICLE_TITLE, timeout=10)
+    selector = _find_long_title_element(page)
 
     page.evaluate(
         f"""
         (() => {{
-            const el = document.querySelector({json.dumps(LONG_ARTICLE_TITLE)});
+            const el = document.querySelector({json.dumps(selector)});
             if (!el) return false;
-            const nativeSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLTextAreaElement.prototype, 'value'
-            ).set;
-            el.focus();
-            nativeSetter.call(el, {json.dumps(title)});
+            el.scrollIntoView({{block: 'center', inline: 'nearest'}});
+            if (typeof el.focus === 'function') {{
+                el.focus({{preventScroll: true}});
+            }}
+
+            if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {{
+                const proto = el.tagName === 'TEXTAREA'
+                    ? window.HTMLTextAreaElement.prototype
+                    : window.HTMLInputElement.prototype;
+                const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                if (nativeSetter) {{
+                    nativeSetter.call(el, {json.dumps(title)});
+                }} else {{
+                    el.value = {json.dumps(title)};
+                }}
+            }} else {{
+                el.textContent = {json.dumps(title)};
+            }}
             el.dispatchEvent(new Event('input', {{ bubbles: true }}));
             el.dispatchEvent(new Event('change', {{ bubbles: true }}));
             return true;
@@ -202,6 +220,29 @@ def _fill_long_title(page: Page, title: str) -> None:
     )
     logger.info("已填写长文标题: %s", title[:20])
     time.sleep(0.5)
+
+
+def _find_long_title_element(page: Page) -> str:
+    """查找长文标题输入框。"""
+    if page.has_element(LONG_ARTICLE_TITLE):
+        return LONG_ARTICLE_TITLE
+
+    selector = _find_best_editable_element(
+        page,
+        marker_value="long-article-title",
+        preferred_selectors=[
+            LONG_ARTICLE_TITLE,
+            "textarea[placeholder*='标题']",
+            "input[placeholder*='标题']",
+            "textarea[aria-label*='标题']",
+            "input[aria-label*='标题']",
+        ],
+        positive_keywords=["标题", "题目", "文章标题"],
+        negative_keywords=["正文", "描述", "内容", "搜索"],
+    )
+    if selector:
+        return selector
+    raise PublishError("没有找到长文标题输入框")
 
 
 def _fill_long_content(page: Page, content: str) -> None:
