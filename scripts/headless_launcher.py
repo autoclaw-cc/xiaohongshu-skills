@@ -223,14 +223,32 @@ def _spawn_chromium(host: str, port: int) -> None:
         f"--remote-debugging-address={host}",
         f"--user-data-dir={PROFILE_DIR}",
     ]
-    # Optional: route Chrome's outbound traffic through a proxy. This is
-    # required on networks that block googleapis.com (the GCM service
-    # will hang in a retry loop and starve the CDP HTTP handler).
     if PROXY_URL:
+        # Outbound proxy: lets GCM / SafeBrowsing / etc. reach
+        # googleapis.com so their retry loops terminate cleanly.
         cmd += [
             f"--proxy-server={PROXY_URL}",
-            # Never proxy the CDP loopback: we must talk to ourselves directly.
+            # CDP loopback must stay direct.
             "--proxy-bypass-list=<-loopback>,127.0.0.1,::1,localhost",
+        ]
+    else:
+        # No proxy: blackhole the Google service hosts so connection
+        # attempts fail FAST (TCP refused) instead of hanging on a
+        # blocked SSL handshake. The GCM service then gives up
+        # immediately and the libevent main loop stays free for CDP.
+        # This avoids the chrome-149 headless GCM DEPRECATED_ENDPOINT
+        # hang on networks that block googleapis.com.
+        cmd += [
+            "--host-rules="
+            + ",".join([
+                "MAP clients2.google.com 127.0.0.1",
+                "MAP fcm.googleapis.com 127.0.0.1",
+                "MAP *.googleapis.com 127.0.0.1",
+                "MAP accounts.google.com 127.0.0.1",
+                "MAP ssl.gstatic.com 127.0.0.1",
+                "MAP clientservices.googleapis.com 127.0.0.1",
+                "MAP optimizely.com 127.0.0.1",
+            ]),
         ]
     cmd.append("about:blank")
     logger.info("Launching headless Chromium: %s", " ".join(cmd))
