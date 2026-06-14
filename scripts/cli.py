@@ -133,7 +133,11 @@ def _connect(args: argparse.Namespace):
     import headless_launcher  # scripts/headless_launcher.py, 同 package 兄弟
 
     headless_launcher.ensure_browser()
-    cdp_browser = Browser()
+    # Chrome 149 headless on Linux sometimes only binds [::1]:9222 even
+    # when --remote-debugging-address=127.0.0.1 is requested. Probe both
+    # loopbacks and pick the one that actually serves /json/version.
+    chosen_host = headless_launcher._probe_working_cdp_host() or "127.0.0.1"
+    cdp_browser = Browser(host=chosen_host, port=9222)
     cdp_browser.connect()
     page = cdp_browser.new_page()
     return _DummyBrowser(cdp_browser=cdp_browser, page=page), page

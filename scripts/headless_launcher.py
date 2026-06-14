@@ -45,6 +45,14 @@ PROFILE_DIR = Path(
     )
 )
 
+# Proxy: set XHS_CHROME_PROXY to e.g. "http://192.168.31.32:17899" to route
+# all Chrome traffic through it. Required for Chrome 149 headless on
+# networks that block googleapis.com (where GCM / SafeBrowsing / etc.
+# services hang in retry loops and starve the CDP HTTP handler).
+# The proxy-bypass-list keeps the CDP loopback (127.0.0.1 / ::1 / localhost)
+# direct so we never go through the proxy to talk to ourselves.
+PROXY_URL = os.environ.get("XHS_CHROME_PROXY", "").strip()
+
 # Hide HeadlessChrome from the UA; many sites (XHS included) detect it.
 CHROME_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -107,22 +115,51 @@ def _find_chromium() -> str:
 
 
 def _port_is_open(host: str, port: int, timeout: float = 0.5) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
+    """True if any loopback (127.0.0.1 or [::1]) accepts a TCP connect on port.
+
+    Chrome 149 headless sometimes binds only IPv6; trying just the
+    configured host misses it.
+    """
+    loopbacks: list[str] = [host, "127.0.0.1", "::1"]
+    seen: set[str] = set()
+    for h in loopbacks:
+        if h in seen:
+            continue
+        seen.add(h)
+        try:
+            with socket.create_connection((h, port), timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _cdp_is_ready(host: str, port: int, timeout: float = 1.0) -> bool:
-    """True only if the port answers AND it speaks the CDP /json/version protocol."""
+    """True only if the port answers AND it speaks the CDP /json/version protocol.
+
+    Chrome 149 headless on Linux sometimes binds only the IPv6 loopback
+    ([::1]:9222) even when ``--remote-debugging-address=127.0.0.1`` is
+    passed (the flag is silently ignored in some builds). Try both.
+    """
     import requests  # local import: dependency may not be on path before uv sync
 
-    try:
-        r = requests.get(f"http://{host}:{port}/json/version", timeout=timeout)
-        return r.ok and "webSocketDebuggerUrl" in r.json()
-    except Exception:
-        return False
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for h in (host, "127.0.0.1", "[::1]", "localhost"):
+        if h in seen:
+            continue
+        seen.add(h)
+        candidates.append(h)
+
+    for h in candidates:
+        url = f"http://{h}:{port}/json/version"
+        try:
+            r = requests.get(url, timeout=timeout)
+            if r.ok and "webSocketDebuggerUrl" in r.json():
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _acquire_lock() -> None:
@@ -185,8 +222,17 @@ def _spawn_chromium(host: str, port: int) -> None:
         f"--remote-debugging-port={port}",
         f"--remote-debugging-address={host}",
         f"--user-data-dir={PROFILE_DIR}",
-        "about:blank",
     ]
+    # Optional: route Chrome's outbound traffic through a proxy. This is
+    # required on networks that block googleapis.com (the GCM service
+    # will hang in a retry loop and starve the CDP HTTP handler).
+    if PROXY_URL:
+        cmd += [
+            f"--proxy-server={PROXY_URL}",
+            # Never proxy the CDP loopback: we must talk to ourselves directly.
+            "--proxy-bypass-list=<-loopback>,127.0.0.1,::1,localhost",
+        ]
+    cmd.append("about:blank")
     logger.info("Launching headless Chromium: %s", " ".join(cmd))
     # New session group so we can SIGTERM the whole tree; stdout/stderr to log.
     log_path = PROFILE_DIR.parent / "chrome.log"
@@ -206,65 +252,118 @@ def ensure_page(browser=None) -> "Page":
     Mirrors the bridge path's contract: a single Page is created and returned
     in a "ready to navigate" state. If ``browser`` is None, ensures one first.
     """
-    from xhs.cdp import Browser, CDPClient
+    from xhs.cdp import Browser
 
     if browser is None:
-        browser = Browser(host=HOST, port=PORT)
+        # Chrome 149 headless on Linux sometimes only binds [::1]:9222
+        # even when --remote-debugging-address=127.0.0.1 is requested.
+        # Probe both loopbacks and pick the one that actually works.
+        chosen_host = _probe_working_cdp_host()
+        if chosen_host is None:
+            chosen_host = HOST  # fall back; cdp.Browser will fail loudly
+        browser = Browser(host=chosen_host, port=PORT)
         browser.connect()
     page = browser.new_page()
     return page
 
 
+def _probe_working_cdp_host() -> str | None:
+    """Return the loopback that actually serves /json/version right now."""
+    import requests
+
+    for h in (HOST, "127.0.0.1", "[::1]", "localhost"):
+        try:
+            r = requests.get(f"http://{h}:{PORT}/json/version", timeout=1)
+            if r.ok and "webSocketDebuggerUrl" in r.json():
+                return h
+        except Exception:
+            continue
+    return None
+
+
 def shutdown_browser() -> None:
     """Best-effort shutdown of the headless Chromium (used by wrapper script).
 
-    Three-tier strategy, because Chrome can be in any of these states:
-      1. CDP is up (normal case) — use ``Browser.close`` which sends
-         ``Browser.close`` over CDP. Clean.
-      2. CDP is down but the process is still alive (zombie: SingletonLock
-         held, port unreachable, gpu/network subprocs alive but the main
-         browser has wedged). Try to kill the process group via SIGTERM,
-         since we used ``start_new_session=True`` at spawn time so the
-         browser is its own session leader.
-      3. Nothing to do.
+    Tries in this order:
+      1. CDP ``/json/close`` (graceful: closes all tabs, then quits)
+      2. SIGTERM the whole process group via ``killpg`` (zombie or
+         wedged-CDP fallback)
+      3. Best-effort cleanup of the launcher-side /tmp/xhs/headless.lock
+         and the per-profile SingletonLock (the next start will recreate
+         them anyway)
     """
     import os
     import signal
     import subprocess
 
-    if not _port_is_open(HOST, PORT):
-        # Try a process-group kill before giving up — handles zombie state.
-        # Look for the headless Chromium master process and SIGTERM its
-        # whole pgroup.
-        try:
-            r = subprocess.run(
-                ["pgrep", "-f", "google-chrome.*--headless=new.*chrome-profile"],
-                capture_output=True, text=True, timeout=3,
-            )
-            for pid in [int(x) for x in r.stdout.split() if x.strip().isdigit()]:
-                try:
-                    pgid = os.getpgid(pid)
-                    os.killpg(pgid, signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    pass
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
-        try:
-            LOCK_PATH.unlink(missing_ok=True)
-        except OSError:
-            pass
-        return
-
-    # CDP is up: try CDP's /json/close first, then fall back to process kill.
+    # Step 1: try the graceful CDP shutdown first
+    cdp_close_attempted = False
     try:
         import requests
-        requests.get(f"http://{HOST}:{PORT}/json/close", timeout=2)
+        for h in (HOST, "127.0.0.1", "[::1]", "localhost"):
+            try:
+                requests.get(f"http://{h}:{PORT}/json/close", timeout=2)
+                cdp_close_attempted = True
+                break
+            except Exception:
+                continue
     except Exception:
         pass
+
+    # Give the graceful path a few seconds to do its thing
+    if cdp_close_attempted:
+        time.sleep(2)
+
+    # Step 2: if anything is still alive, SIGTERM the process group.
+    # We avoid `pgrep -f` entirely because it has two nasty footguns:
+    #   (a) on a pattern that starts with `--`, pgrep treats the pattern
+    #       as a flag and fails to match anything
+    #   (b) `pgrep -f` matches against the full command line, so pgrep
+    #       itself (and the wrapper bash that ran the pattern) get
+    #       matched — easy to SIGTERM the wrong process
+    # Also, the binary path is /opt/google/chrome/chrome (no
+    # "google-chrome" string), so we match on "chrome" as the binary
+    # basename, anchored via the comm filter.
+    # Instead, walk /proc directly and regex the cmdline bytes.
+    if _port_is_open(HOST, PORT):
+        import re as _re
+
+        pattern = _re.compile(
+            rf"--remote-debugging-port={PORT}.*--user-data-dir.*chrome-profile"
+        )
+        try:
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                pid = int(entry)
+                if pid == os.getpid():
+                    continue
+                try:
+                    with open(f"/proc/{pid}/cmdline", "rb") as f:
+                        data = f.read().replace(b"\x00", b" ").decode(
+                            "utf-8", errors="replace"
+                        )
+                    if not pattern.search(data):
+                        continue
+                    with open(f"/proc/{pid}/comm") as f:
+                        comm = f.read().strip()
+                    # Defensive: only act on real Chrome master procs
+                    if comm not in ("chrome", "chromium"):
+                        continue
+                    pgid = os.getpgid(pid)
+                    os.killpg(pgid, signal.SIGTERM)
+                except (OSError, ProcessLookupError, PermissionError):
+                    continue
+        except OSError:
+            pass
+
+    # Step 3: lock cleanup (next start recreates these anyway)
     try:
         LOCK_PATH.unlink(missing_ok=True)
     except OSError:
         pass
+    # SingletonLock is owned by Chrome, not by us; let Chrome clean it up
+    # when the process actually exits. Don't touch it from here.
 
 
 if __name__ == "__main__":
