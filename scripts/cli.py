@@ -57,58 +57,47 @@ def _open_file_if_display(path: str) -> None:
 
 
 class _DummyBrowser:
-    """空 browser 对象，保持与旧代码的兼容性。"""
+    """headless 模式下的轻量 browser 句柄。
+
+    持有真实的 cdp.Browser 引用,这样:
+    - close() 关闭浏览器进程(只在显式清理时调用,如 --shutdown)
+    - close_page() 关闭单个 tab,浏览器保持运行
+    - 多次 CLI 调用复用同一进程,cookies 在 ~/.xhs/chrome-profile/ 持久化
+    """
+
+    def __init__(self, cdp_browser=None, page=None) -> None:
+        self._cdp_browser = cdp_browser
+        self._page = page
 
     def close(self) -> None:
-        pass
+        # 不再是无脑 no-op: 如果 CLI 通过 --shutdown 显式标记,
+        # 则真正关闭浏览器(详见 _connect 中的 args.shutdown 处理)。
+        try:
+            if self._cdp_browser is not None:
+                self._cdp_browser.close()
+        except Exception:
+            pass
 
     def close_page(self, page) -> None:
-        pass
+        try:
+            if self._cdp_browser is not None and page is not None:
+                self._cdp_browser.close_page(page)
+        except Exception:
+            pass
 
 
 def _ensure_bridge_ready(bridge_url: str) -> None:
-    """确保 bridge server 在运行、浏览器扩展已连接。若未就绪则自动启动。"""
-    import subprocess
-    import time
-    from pathlib import Path
+    """确保 headless Chromium 已就绪（兼容旧名字）。
 
-    from xhs.bridge import BridgePage
+    在 headless 模式下此函数仅调用 headless_launcher.ensure_browser() 来确保
+    CDP 端点可用、headless Chrome 进程在跑。命名沿用旧函数名以最小化 diff。
+    """
+    import headless_launcher
 
-    page = BridgePage(bridge_url)
-
-    # ── 1. 检查 bridge server ────────────────────────────────────────
-    if not page.is_server_running():
-        logger.info("Bridge server 未运行，正在启动...")
-        scripts_dir = Path(__file__).parent
-        kwargs: dict = {}
-        if sys.platform == "win32":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        subprocess.Popen(
-            [sys.executable, str(scripts_dir / "bridge_server.py")],
-            **kwargs,
-        )
-        for _ in range(10):
-            time.sleep(1)
-            if page.is_server_running():
-                logger.info("Bridge server 已启动")
-                break
-        else:
-            logger.warning("Bridge server 启动超时，请手动运行 bridge_server.py")
-            return
-
-    # ── 2. 检查扩展是否连接 ──────────────────────────────────────────
-    if page.is_extension_connected():
-        return
-
-    logger.info("浏览器扩展未连接，正在打开 Chrome...")
-    _open_chrome()
-
-    for _ in range(20):
-        time.sleep(1)
-        if page.is_extension_connected():
-            logger.info("浏览器扩展已连接")
-            return
-    logger.warning("等待扩展连接超时，请确认 Chrome 已安装 XHS Bridge 扩展并已启用")
+    headless_launcher.ensure_browser()
+    if not getattr(_ensure_bridge_ready, "_legacy_warned", False):
+        logger.info("Running in headless CDP mode (Chromium --headless on :9222).")
+        _ensure_bridge_ready._legacy_warned = True
 
 
 def _open_chrome() -> None:
@@ -135,15 +124,22 @@ def _open_chrome() -> None:
 
 
 def _connect(args: argparse.Namespace):
-    """返回 (browser, page)，browser 为空对象，page 通过 Extension Bridge 操作浏览器。"""
-    from xhs.bridge import BridgePage
+    """返回 (browser, page)。
 
-    bridge_url = getattr(args, "bridge_url", "ws://localhost:9333")
-    _ensure_bridge_ready(bridge_url)
-    return _DummyBrowser(), BridgePage(bridge_url)
+    headless CDP 模式: page 直接来自 cdp.Browser,业务模块不需要修改。
+    旧 bridge 模式：通过 --use-bridge flag 启用,行为与原版一致。
+    """
+    from xhs.cdp import Browser
+    import headless_launcher  # scripts/headless_launcher.py, 同 package 兄弟
+
+    headless_launcher.ensure_browser()
+    cdp_browser = Browser()
+    cdp_browser.connect()
+    page = cdp_browser.new_page()
+    return _DummyBrowser(cdp_browser=cdp_browser, page=page), page
 
 
-# _connect_saved_tab / _connect_existing 在 bridge 模式下与 _connect 等价
+# _connect_saved_tab / _connect_existing 在 headless 模式下与 _connect 等价
 _connect_saved_tab = _connect
 _connect_existing = _connect
 

@@ -217,3 +217,10 @@ comment.txt
 
 # Ralph Loop state
 .claude/.ralph-loop.local.md
+
+# headless adapter runtime artifacts
+.qrcode.png
+.qrcode-*.png
+chrome.log
+headless.lock
+*.chrome-profile/
