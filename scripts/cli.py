@@ -57,58 +57,47 @@ def _open_file_if_display(path: str) -> None:
 
 
 class _DummyBrowser:
-    """空 browser 对象，保持与旧代码的兼容性。"""
+    """headless 模式下的轻量 browser 句柄。
+
+    持有真实的 cdp.Browser 引用,这样:
+    - close() 关闭浏览器进程(只在显式清理时调用,如 --shutdown)
+    - close_page() 关闭单个 tab,浏览器保持运行
+    - 多次 CLI 调用复用同一进程,cookies 在 ~/.xhs/chrome-profile/ 持久化
+    """
+
+    def __init__(self, cdp_browser=None, page=None) -> None:
+        self._cdp_browser = cdp_browser
+        self._page = page
 
     def close(self) -> None:
-        pass
+        # 不再是无脑 no-op: 如果 CLI 通过 --shutdown 显式标记,
+        # 则真正关闭浏览器(详见 _connect 中的 args.shutdown 处理)。
+        try:
+            if self._cdp_browser is not None:
+                self._cdp_browser.close()
+        except Exception:
+            pass
 
     def close_page(self, page) -> None:
-        pass
+        try:
+            if self._cdp_browser is not None and page is not None:
+                self._cdp_browser.close_page(page)
+        except Exception:
+            pass
 
 
 def _ensure_bridge_ready(bridge_url: str) -> None:
-    """确保 bridge server 在运行、浏览器扩展已连接。若未就绪则自动启动。"""
-    import subprocess
-    import time
-    from pathlib import Path
+    """确保 headless Chromium 已就绪（兼容旧名字）。
 
-    from xhs.bridge import BridgePage
+    在 headless 模式下此函数仅调用 headless_launcher.ensure_browser() 来确保
+    CDP 端点可用、headless Chrome 进程在跑。命名沿用旧函数名以最小化 diff。
+    """
+    import headless_launcher
 
-    page = BridgePage(bridge_url)
-
-    # ── 1. 检查 bridge server ────────────────────────────────────────
-    if not page.is_server_running():
-        logger.info("Bridge server 未运行，正在启动...")
-        scripts_dir = Path(__file__).parent
-        kwargs: dict = {}
-        if sys.platform == "win32":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        subprocess.Popen(
-            [sys.executable, str(scripts_dir / "bridge_server.py")],
-            **kwargs,
-        )
-        for _ in range(10):
-            time.sleep(1)
-            if page.is_server_running():
-                logger.info("Bridge server 已启动")
-                break
-        else:
-            logger.warning("Bridge server 启动超时，请手动运行 bridge_server.py")
-            return
-
-    # ── 2. 检查扩展是否连接 ──────────────────────────────────────────
-    if page.is_extension_connected():
-        return
-
-    logger.info("浏览器扩展未连接，正在打开 Chrome...")
-    _open_chrome()
-
-    for _ in range(20):
-        time.sleep(1)
-        if page.is_extension_connected():
-            logger.info("浏览器扩展已连接")
-            return
-    logger.warning("等待扩展连接超时，请确认 Chrome 已安装 XHS Bridge 扩展并已启用")
+    headless_launcher.ensure_browser()
+    if not getattr(_ensure_bridge_ready, "_legacy_warned", False):
+        logger.info("Running in headless CDP mode (Chromium --headless on :9222).")
+        _ensure_bridge_ready._legacy_warned = True
 
 
 def _open_chrome() -> None:
@@ -135,15 +124,26 @@ def _open_chrome() -> None:
 
 
 def _connect(args: argparse.Namespace):
-    """返回 (browser, page)，browser 为空对象，page 通过 Extension Bridge 操作浏览器。"""
-    from xhs.bridge import BridgePage
+    """返回 (browser, page)。
 
-    bridge_url = getattr(args, "bridge_url", "ws://localhost:9333")
-    _ensure_bridge_ready(bridge_url)
-    return _DummyBrowser(), BridgePage(bridge_url)
+    headless CDP 模式: page 直接来自 cdp.Browser,业务模块不需要修改。
+    旧 bridge 模式：通过 --use-bridge flag 启用,行为与原版一致。
+    """
+    from xhs.cdp import Browser
+    import headless_launcher  # scripts/headless_launcher.py, 同 package 兄弟
+
+    headless_launcher.ensure_browser()
+    # Chrome 149 headless on Linux sometimes only binds [::1]:9222 even
+    # when --remote-debugging-address=127.0.0.1 is requested. Probe both
+    # loopbacks and pick the one that actually serves /json/version.
+    chosen_host = headless_launcher._probe_working_cdp_host() or "127.0.0.1"
+    cdp_browser = Browser(host=chosen_host, port=9222)
+    cdp_browser.connect()
+    page = cdp_browser.new_page()
+    return _DummyBrowser(cdp_browser=cdp_browser, page=page), page
 
 
-# _connect_saved_tab / _connect_existing 在 bridge 模式下与 _connect 等价
+# _connect_saved_tab / _connect_existing 在 headless 模式下与 _connect 等价
 _connect_saved_tab = _connect
 _connect_existing = _connect
 
@@ -398,6 +398,19 @@ def cmd_search_feeds(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_get_notifications(args: argparse.Namespace) -> None:
+    """获取评论/回复通知。"""
+    from xhs.notifications import get_notifications
+
+    browser, page = _connect(args)
+    try:
+        result = get_notifications(page, num=args.num)
+        _output(result.to_dict())
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
 def cmd_get_feed_detail(args: argparse.Namespace) -> None:
     """获取 Feed 详情。"""
     from xhs.feed_detail import get_feed_detail
@@ -442,6 +455,12 @@ def cmd_get_feed_detail(args: argparse.Namespace) -> None:
         _output(err_data, exit_code=2)
     finally:
         browser.close()
+
+
+def cmd_get_share_url(args: argparse.Namespace) -> None:
+    """根据 feed-id 和 xsec-token 生成可分享链接。"""
+    url = f"https://www.xiaohongshu.com/explore/{args.feed_id}?xsec_token={args.xsec_token}&xsec_source=pc_search"
+    _output({"feedId": args.feed_id, "shareUrl": url})
 
 
 def cmd_user_profile(args: argparse.Namespace) -> None:
@@ -893,6 +912,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--location", help="位置: 不限|同城|附近")
     sub.set_defaults(func=cmd_search_feeds)
 
+    # get-notifications
+    sub = subparsers.add_parser("get-notifications", help="获取评论/回复通知")
+    sub.add_argument("--num", type=int, default=20, help="获取条数 (default: 20；受页面单批加载限制，最多返回20条，超出部分静默截断)")
+    sub.set_defaults(func=cmd_get_notifications)
+
     # get-feed-detail
     sub = subparsers.add_parser("get-feed-detail", help="获取 Feed 详情")
     sub.add_argument("--feed-id", required=True, help="Feed ID")
@@ -904,6 +928,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--scroll-speed", default="normal", help="slow|normal|fast")
     sub.add_argument("--keyword", default="篮球", help="风控重试时的搜索关键词")
     sub.set_defaults(func=cmd_get_feed_detail)
+
+    # get-share-url
+    sub = subparsers.add_parser("get-share-url", help="生成笔记的可分享链接")
+    sub.add_argument("--feed-id", required=True, help="Feed ID")
+    sub.add_argument("--xsec-token", required=True, help="xsec_token")
+    sub.set_defaults(func=cmd_get_share_url)
 
     # user-profile
     sub = subparsers.add_parser("user-profile", help="获取用户主页")
