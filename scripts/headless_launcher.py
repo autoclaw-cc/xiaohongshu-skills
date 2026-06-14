@@ -216,21 +216,49 @@ def ensure_page(browser=None) -> "Page":
 
 
 def shutdown_browser() -> None:
-    """Best-effort shutdown of the headless Chromium (used by wrapper script)."""
+    """Best-effort shutdown of the headless Chromium (used by wrapper script).
+
+    Three-tier strategy, because Chrome can be in any of these states:
+      1. CDP is up (normal case) — use ``Browser.close`` which sends
+         ``Browser.close`` over CDP. Clean.
+      2. CDP is down but the process is still alive (zombie: SingletonLock
+         held, port unreachable, gpu/network subprocs alive but the main
+         browser has wedged). Try to kill the process group via SIGTERM,
+         since we used ``start_new_session=True`` at spawn time so the
+         browser is its own session leader.
+      3. Nothing to do.
+    """
+    import os
+    import signal
+    import subprocess
+
     if not _port_is_open(HOST, PORT):
+        # Try a process-group kill before giving up — handles zombie state.
+        # Look for the headless Chromium master process and SIGTERM its
+        # whole pgroup.
+        try:
+            r = subprocess.run(
+                ["pgrep", "-f", "google-chrome.*--headless=new.*chrome-profile"],
+                capture_output=True, text=True, timeout=3,
+            )
+            for pid in [int(x) for x in r.stdout.split() if x.strip().isdigit()]:
+                try:
+                    pgid = os.getpgid(pid)
+                    os.killpg(pgid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        try:
+            LOCK_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
         return
-    import requests
 
+    # CDP is up: try CDP's /json/close first, then fall back to process kill.
     try:
-        r = requests.get(f"http://{HOST}:{PORT}/json/version", timeout=2)
-        ws = r.json().get("webSocketDebuggerUrl", "")
-    except Exception:
-        return
-    # CDP Browser.close via HTTP: GET /json/close shuts the whole browser.
-    try:
-        import requests as _r
-
-        _r.get(f"http://{HOST}:{PORT}/json/close", timeout=2)
+        import requests
+        requests.get(f"http://{HOST}:{PORT}/json/close", timeout=2)
     except Exception:
         pass
     try:

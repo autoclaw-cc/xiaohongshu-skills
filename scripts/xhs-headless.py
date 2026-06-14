@@ -79,7 +79,7 @@ def tempfile_gettempdir_login_qrcode() -> str:
 
 def _shutdown() -> int:
     """关闭 headless Chromium。"""
-    from xhs import headless_launcher
+    import headless_launcher  # scripts/headless_launcher.py, 同 package 兄弟
 
     try:
         headless_launcher.shutdown_browser()
