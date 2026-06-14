@@ -30,6 +30,36 @@ metadata:
 - **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
 - **完成即止**：任务完成后直接告知结果，等待用户下一步指令。
 
+## 🖥️ 运行模式
+
+本 skill 有两种运行方式：
+
+### 1. 浏览器扩展模式（默认上游方式）
+需要用户在自己电脑上安装 Chrome 扩展（`extension/` 目录）并启动 `python scripts/bridge_server.py`。真实账号、真实浏览器环境，风控风险最低。**本 skill 默认走这一条路径**。
+
+### 2. Headless 模式（无头 Linux 服务器）
+如果用户当前在无 GUI / 无桌面浏览器的服务器上，让 agent 使用 `scripts/xhs-headless.py` 包装层而不是直接调 `cli.py`。Headless 模式会：
+- 用本机 google-chrome / chromium headless 模式（不需要 GUI）
+- 持久化 cookies 在 `~/.xhs/chrome-profile/`，扫码登录一次后复用
+- 默认通过 `--host-rules` 把 GCM 端点黑洞到 127.0.0.1，避免 Chrome 149 headless 在断网环境下的 GCM 死循环 hang 死 CDP
+
+**用法示例**：
+```bash
+cd ~/.hermes/skills/xiaohongshu-skills
+.venv/bin/python scripts/xhs-headless.py check-login     # 一次扫码登录
+.venv/bin/python scripts/xhs-headless.py list-feeds      # 任何后续命令
+.venv/bin/python scripts/xhs-headless.py get-share-url --feed-id <id> --xsec-token <tok>
+.venv/bin/python scripts/xhs-headless.py get-notifications --num 10
+.venv/bin/python scripts/xhs-headless.py --shutdown       # 关 Chrome
+```
+
+**可选环境变量**：
+- `XHS_CHROME_PROXY=http://...:port` — 让所有 Chrome 流量走代理（默认不设，host-rules 黑洞足够）
+- `XHS_CHROME_PROFILE=/path` — 自定义 cookies 存储目录
+- `XHS_CDP_PORT=9222` — 自定义 CDP 端口
+
+**风控提示**：headless 模式有 IP 风险。**建议用专用小号**，不要用主账号；操作频率按 upstream `xhs-explore` SKILL.md 的内联风控规则控制。
+
 ---
 
 ## 输入判断

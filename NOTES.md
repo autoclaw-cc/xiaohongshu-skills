@@ -19,6 +19,9 @@ changes.
 | `ed0b65d` | English README section + bilingual navigation | upstream PR #25 (open, **heavily reworked**) | active |
 | `3c69f2f` | `shareUrl` on Feed + `get-share-url` CLI command | upstream PR #66 (open) | active |
 | `b25b7cf` | `get-notifications` CLI command + new module | upstream PR #46 (open) | active |
+| `a9b8e88` | `shutdown_browser()` kills zombie Chrome process group | this branch — first shutdown fix | superseded by `4bd70c0` |
+| `686e5f1` | Chrome 149 GCM hang: add proxy + IPv6 probe + real shutdown | this branch — required a proxy | **kept as opt-in** |
+| `4bd70c0` | Default to no-proxy; blackhole GCM hosts via `--host-rules` | this branch — final fix | active |
 
 All five upstream PRs were **OPEN** at the time of adoption (not merged into
 upstream `main`). Adopting them early gives the headless variant the same
@@ -118,6 +121,58 @@ Three upstream PRs cherry-picked together; all touch only docs or
 - **Why manually merged**: same `cli.py` line-shift issue as #66.
 - **Risk**: low. New command, no breakage.
 
+### `a9b8e88` — first shutdown_browser() fix (superseded)
+
+- **What**: added a SIGTERM-the-process-group fallback in
+  `headless_launcher.shutdown_browser()` so a zombie Chrome holding
+  port 9222 could be cleaned up.
+- **Why superseded**: the pgrep-based killpg loop silently no-op'd
+  because of three bugs (see `4bd70c0` for the post-mortem).
+- **Risk**: low (the path that worked — CDP `/json/close` — still works
+  here, and the broken killpg path is now fixed in `4bd70c0`).
+
+### `686e5f1` — chrome 149 GCM hang (proxy + IPv6 + real shutdown)
+
+- **What**: made the headless adapter survive Chrome 149's
+  GCM-DEPRECATED-ENDPOINT retry loop on networks that block
+  googleapis.com. Three coordinated changes:
+  1. Optional outbound proxy via `XHS_CHROME_PROXY` — Chrome's GCM
+     / SafeBrowsing / etc. can reach googleapis.com through the proxy
+     and the retry loops terminate cleanly. `--proxy-bypass-list` keeps
+     the CDP loopback direct.
+  2. IPv4+IPv6 dual probe — Chrome 149 sometimes binds only `[::1]:9222`
+     even when `--remote-debugging-address=127.0.0.1` is requested.
+     `_cdp_is_ready`, `_port_is_open`, `ensure_page` and `_connect`
+     now probe both loopbacks.
+  3. `shutdown_browser()` actually kills Chrome — the previous
+     pgrep-based killpg silently no-op'd because (a) pgrep treated
+     patterns starting with `--` as flags, (b) pgrep matched the
+     wrapper bash that ran the pattern, (c) the binary path is
+     `/opt/google/chrome/chrome` not `google-chrome`. New impl walks
+     `/proc` directly, regex-matches cmdline bytes, comm-filters to
+     real Chrome master procs.
+- **Files**: `scripts/headless_launcher.py`, `scripts/cli.py`
+- **Status**: kept as opt-in. `XHS_CHROME_PROXY` still works for
+  users who want it. The default no-proxy path is now `4bd70c0`.
+
+### `4bd70c0` — drop proxy requirement, use `--host-rules` to blackhole GCM
+
+- **What**: makes the no-proxy path the default. The fix turned out to
+  be much simpler than `686e5f1`'s proxy — pass
+  `--host-rules="MAP clients2.google.com 127.0.0.1,MAP fcm.googleapis.com
+  127.0.0.1,..."` so Chrome internally resolves every Google service
+  host to 127.0.0.1. GCM then attempts TCP connect to 127.0.0.1:443,
+  gets ECONNREFUSED immediately, the service gives up right away, and
+  the libevent main loop stays free for CDP.
+- **Why this beats the proxy path**:
+  1. No IP leakage — XHS sees the server's real IP, not a shared proxy IP
+  2. No external dependency (the proxy might be down)
+  3. One flag instead of two
+  4. Works on any host with no special privileges
+- **Files**: `scripts/headless_launcher.py`
+- **Status**: **active default**. The proxy path remains for users
+  who specifically want to mask their server IP.
+
 ---
 
 ## Compatibility & upgrade playbook
@@ -179,13 +234,20 @@ cd ~/.hermes/skills/xiaohongshu-skills
 # → scan the QR at .qrcode.png with the 小红书 app
 
 # Use any upstream command through the headless wrapper
+# (no environment variables required — `--host-rules` blackholes
+# GCM/SafeBrowsing hosts so Chrome 149 doesn't hang in retry loops)
 .venv/bin/python scripts/xhs-headless.py search-feeds --keyword "..."
 .venv/bin/python scripts/xhs-headless.py list-feeds
 .venv/bin/python scripts/xhs-headless.py get-feed-detail --feed-id <id> --xsec-token <tok>
 .venv/bin/python scripts/xhs-headless.py get-share-url  --feed-id <id> --xsec-token <tok>   # adopted from #66
 .venv/bin/python scripts/xhs-headless.py get-notifications --num 10                       # adopted from #46
 
-# Release the headless browser when done
+# Optional: route all Chrome traffic through a proxy
+# (default: no proxy; XHS sees the server's real IP)
+#   XHS_CHROME_PROXY="http://192.168.31.32:17899" \
+#     .venv/bin/python scripts/xhs-headless.py list-feeds
+
+# Release the headless browser when done (kills Chrome + frees port 9222)
 .venv/bin/python scripts/xhs-headless.py --shutdown
 ```
 
