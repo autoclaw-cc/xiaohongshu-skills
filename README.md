@@ -1,5 +1,11 @@
 # xiaohongshu-skills
 
+[中文](#中文) · [English](#english)
+
+---
+
+## 中文
+
 小红书自动化 Skills，直接使用你已登录的浏览器和真实账号，以普通用户的方式操作小红书。
 
 支持 [OpenClaw](https://github.com/anthropics/openclaw) 及所有兼容 `SKILL.md` 格式的 AI Agent 平台（如 Claude Code）。
@@ -230,5 +236,49 @@ uv run pytest              # 运行测试
 MIT
 
 ## Star History
+
+---
+
+## English
+
+Xiaohongshu (Little Red Book) automation skills, built on the [OpenClaw](https://github.com/anthropics/openclaw) skill format and compatible with any AI Agent platform that consumes `SKILL.md` (e.g. Claude Code, Hermes).
+
+This project drives a real, logged-in Chrome on the user's side, so the actions look exactly like a normal user — far less likely to trip Xiaohongshu's risk control than a headless bot.
+
+### Features
+
+| Skill | Description | Core capabilities |
+|-------|-------------|-------------------|
+| **xhs-auth** | Authentication | login check, QR login, phone + SMS code login |
+| **xhs-publish** | Content publishing | image-text / video / long-form posts, scheduled posts, multi-step preview |
+| **xhs-explore** | Content discovery | keyword search, note detail, user profile, home feed |
+| **xhs-interact** | Social interaction | comments, replies, likes, favorites, follows |
+| **xhs-content-ops** | Composite ops | competitor analysis, hot-topic tracking, batch publishing |
+
+### Installation
+
+```bash
+# 1. Install the Chrome extension (XHS Bridge) from the extension/ folder
+# 2. Install Python deps
+uv sync
+# 3. Start the bridge server
+python scripts/bridge_server.py
+# 4. Use the CLI
+python scripts/cli.py check-login
+```
+
+> ⚠️ **Usage tip:** even with a real browser + real account, please **control your cadence**. Don't fire hundreds of requests in a short window — Xiaohongshu's risk engine doesn't care that you're a "real user" if you behave like a bot.
+
+### Headless / server-side variant
+
+A community-maintained headless Chromium CDP adapter lives on the `feat/headless-cdp-adapter` branch of this fork. It wraps the same business modules so the skill can run on a Linux box without a GUI. See that branch's README for setup details.
+
+### CLI reference
+
+See `## CLI 命令参考` above (full subcommand table is shared between languages).
+
+### License
+
+MIT
 
 [![Star History Chart](https://api.star-history.com/image?repos=autoclaw-cc/xiaohongshu-skills&type=date&legend=top-left)](https://www.star-history.com/?repos=autoclaw-cc%2Fxiaohongshu-skills&type=date&legend=top-left)
