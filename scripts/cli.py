@@ -278,7 +278,9 @@ def cmd_wait_login(args: argparse.Namespace) -> None:
         _output(
             {
                 "logged_in": success,
-                "message": "登录成功" if success else "等待超时，请重新运行 get-qrcode 获取新二维码",
+                "message": "登录成功"
+                if success
+                else "等待超时，请重新运行 get-qrcode 获取新二维码",
             },
             exit_code=0 if success else 2,
         )
@@ -324,13 +326,15 @@ def cmd_send_code(args: argparse.Namespace) -> None:
         if not sent:
             _output({"logged_in": True, "message": "已登录，无需重新登录"})
             return
-        _output({
-            "status": "code_sent",
-            "message": (
-                f"验证码已发送至 {args.phone[:3]}****{args.phone[-4:]}，"
-                "请运行 verify-code --code <验证码>"
-            ),
-        })
+        _output(
+            {
+                "status": "code_sent",
+                "message": (
+                    f"验证码已发送至 {args.phone[:3]}****{args.phone[-4:]}，"
+                    "请运行 verify-code --code <验证码>"
+                ),
+            }
+        )
     except RateLimitError:
         _qrcode_fallback(browser, page, args)
     finally:
@@ -420,7 +424,19 @@ def cmd_get_feed_detail(args: argparse.Namespace) -> None:
             config=config,
             keyword=getattr(args, "keyword", "篮球"),
         )
-        _output(detail.to_dict())
+        result = detail.to_dict()
+        save_media = getattr(args, "save_media", None)
+        note_video = result.get("note", {}).get("video") or {}
+        if save_media and note_video.get("url"):
+            from xhs.errors import MediaDownloadError
+            from xhs.media import download_video
+
+            try:
+                path = download_video(note_video["url"], save_media, args.feed_id)
+                note_video["localPath"] = str(path)
+            except MediaDownloadError as e:
+                note_video["downloadError"] = str(e)
+        _output(result)
     except Exception as e:
         # 附带 404 诊断事件，帮助定位根因
         diagnostics: list = []
@@ -580,7 +596,14 @@ def cmd_fill_publish(args: argparse.Namespace) -> None:
                 visibility=args.visibility or "",
             ),
         )
-        _output({"success": True, "title": title, "images": len(image_paths), "status": "表单已填写，等待确认发布"})
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "images": len(image_paths),
+                "status": "表单已填写，等待确认发布",
+            }
+        )
     finally:
         browser.close()
 
@@ -608,7 +631,14 @@ def cmd_fill_publish_video(args: argparse.Namespace) -> None:
                 visibility=args.visibility or "",
             ),
         )
-        _output({"success": True, "title": title, "video": args.video, "status": "视频表单已填写，等待确认发布"})
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "video": args.video,
+                "status": "视频表单已填写，等待确认发布",
+            }
+        )
     finally:
         browser.close()
 
@@ -700,7 +730,13 @@ def cmd_diagnose_404(args: argparse.Namespace) -> None:
 
         events = page.get_404_diagnostics()
         if not events:
-            _output({"success": True, "events": [], "message": "暂无拦截记录，请在小红书页面进行操作后重试"})
+            _output(
+                {
+                    "success": True,
+                    "events": [],
+                    "message": "暂无拦截记录，请在小红书页面进行操作后重试",
+                }
+            )
             return
 
         # 控制台可读报告（写到 stderr）
@@ -711,18 +747,29 @@ def cmd_diagnose_404(args: argparse.Namespace) -> None:
             diag = ev.get("diagnosis", {})
             logger.info(
                 "[%d] %s %s → HTTP %s",
-                i, ev.get("method", "?"), ev.get("url", "?")[:80], ev.get("status", "?"),
+                i,
+                ev.get("method", "?"),
+                ev.get("url", "?")[:80],
+                ev.get("status", "?"),
             )
             logger.info("    根因: %s", diag.get("root_cause", "未知"))
             logger.info("    详情: %s", diag.get("detail", "")[:120])
-            logger.info("    置信: %s | 类别: %s", diag.get("confidence", "?"), diag.get("cause_category", "?"))
-            logger.info("    时间: %s | 页面: %s", ev.get("timestamp", "?"), ev.get("pageUrl", "?")[:60])
+            logger.info(
+                "    置信: %s | 类别: %s",
+                diag.get("confidence", "?"),
+                diag.get("cause_category", "?"),
+            )
+            logger.info(
+                "    时间: %s | 页面: %s", ev.get("timestamp", "?"), ev.get("pageUrl", "?")[:60]
+            )
             cookies = ev.get("cookies", {})
             req = ev.get("request", {})
             logger.info(
                 "    凭证: web_session=%s a1=%s xs=%s xsec_token=%s",
-                cookies.get("has_web_session"), cookies.get("has_a1"),
-                req.get("has_xs"), bool(req.get("xsec_token")),
+                cookies.get("has_web_session"),
+                cookies.get("has_a1"),
+                req.get("has_xs"),
+                bool(req.get("xsec_token")),
             )
             logger.info("─" * 60)
 
@@ -761,19 +808,31 @@ def cmd_get_netlog(args: argparse.Namespace) -> None:
     browser, page = _connect(args)
     try:
         if not page.get_netlog_enabled():
-            print(json.dumps({
-                "error": "netlogger 未启用",
-                "hint": "请打开扩展 popup，标题 XHS Bridge 连点 5 次激活 NetLog 后重试",
-            }, ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "error": "netlogger 未启用",
+                        "hint": "请打开扩展 popup，标题 XHS Bridge 连点 5 次激活 NetLog 后重试",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             sys.exit(2)
 
         entries = page.get_netlog()
         if args.limit:
-            entries = entries[-args.limit:]
-        print(json.dumps({
-            "total": len(entries),
-            "entries": entries,
-        }, ensure_ascii=False, indent=2))
+            entries = entries[-args.limit :]
+        print(
+            json.dumps(
+                {
+                    "total": len(entries),
+                    "entries": entries,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     finally:
         browser.close()
 
@@ -785,10 +844,16 @@ def cmd_risk_report(args: argparse.Namespace) -> None:
     browser, page = _connect(args)
     try:
         if not page.get_netlog_enabled():
-            print(json.dumps({
-                "error": "netlogger 未启用",
-                "hint": "请打开扩展 popup，标题 XHS Bridge 连点 5 次激活 NetLog 后重试",
-            }, ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "error": "netlogger 未启用",
+                        "hint": "请打开扩展 popup，标题 XHS Bridge 连点 5 次激活 NetLog 后重试",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             sys.exit(2)
 
         entries = page.get_netlog()
@@ -903,6 +968,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--max-comment-items", type=int, default=0)
     sub.add_argument("--scroll-speed", default="normal", help="slow|normal|fast")
     sub.add_argument("--keyword", default="篮球", help="风控重试时的搜索关键词")
+    sub.add_argument(
+        "--save-media",
+        metavar="DIR",
+        help="视频笔记时把视频下载到该目录（绝对路径），输出附带 localPath",
+    )
     sub.set_defaults(func=cmd_get_feed_detail)
 
     # user-profile
