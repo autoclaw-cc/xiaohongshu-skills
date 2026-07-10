@@ -34,6 +34,14 @@ class PageNotAccessibleError(XHSError):
         super().__init__(f"笔记不可访问: {reason}")
 
 
+class MediaDownloadError(XHSError):
+    """媒体文件下载失败。"""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"媒体下载失败: {reason}")
+
+
 class UploadTimeoutError(XHSError):
     """上传超时。"""
 

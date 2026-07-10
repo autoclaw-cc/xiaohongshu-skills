@@ -170,6 +170,37 @@ class Feed:
 # ========== Feed 详情 ==========
 
 
+# 视频流编码优先级：优先 h264（兼容性最好），其次 h265/av1
+_VIDEO_CODECS = ("h264", "h265", "h266", "av1")
+
+
+def _extract_video(video: dict | None) -> tuple[str, int]:
+    """从 note.video 提取视频直链与时长。
+
+    结构：video.media.stream.{h264|h265|...}[0].masterUrl
+    返回 (masterUrl, duration_seconds)；无视频时返回 ("", 0)。
+    """
+    if not video or not isinstance(video, dict):
+        return "", 0
+    duration = 0
+    capa = video.get("capa")
+    if isinstance(capa, dict):
+        duration = capa.get("duration", 0) or 0
+    stream = ((video.get("media") or {}).get("stream")) or {}
+    for codec in _VIDEO_CODECS:
+        items = stream.get(codec) or []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("masterUrl") or ""
+            if not url:
+                backups = item.get("backupUrls") or []
+                url = backups[0] if backups else ""
+            if url:
+                return url, duration
+    return "", duration
+
+
 @dataclass
 class DetailImageInfo:
     width: int = 0
@@ -258,7 +289,7 @@ class FeedDetail:
     xsec_token: str = ""
     title: str = ""
     desc: str = ""
-    body: str = ""   # DOM 正文（干净文本，不含 [话题] 标记）
+    body: str = ""  # DOM 正文（干净文本，不含 [话题] 标记）
     tags: list[str] = field(default_factory=list)  # 话题标签列表
     type: str = ""
     time: int = 0
@@ -266,9 +297,12 @@ class FeedDetail:
     user: User = field(default_factory=User)
     interact_info: InteractInfo = field(default_factory=InteractInfo)
     image_list: list[DetailImageInfo] = field(default_factory=list)
+    video_url: str = ""  # 视频直链（masterUrl，带时效签名）
+    video_duration: int = 0  # 视频时长（秒）
 
     @classmethod
     def from_dict(cls, d: dict) -> FeedDetail:
+        video_url, video_duration = _extract_video(d.get("video"))
         return cls(
             note_id=d.get("noteId", ""),
             xsec_token=d.get("xsecToken", ""),
@@ -282,10 +316,12 @@ class FeedDetail:
             user=User.from_dict(d.get("user", {})),
             interact_info=InteractInfo.from_dict(d.get("interactInfo", {})),
             image_list=[DetailImageInfo.from_dict(i) for i in d.get("imageList", []) or []],
+            video_url=video_url,
+            video_duration=video_duration,
         )
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "noteId": self.note_id,
             "title": self.title,
             "desc": self.desc,
@@ -315,6 +351,12 @@ class FeedDetail:
                 for img in self.image_list
             ],
         }
+        if self.video_url:
+            result["video"] = {
+                "url": self.video_url,
+                "duration": self.video_duration,
+            }
+        return result
 
 
 @dataclass

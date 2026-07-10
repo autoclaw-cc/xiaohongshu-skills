@@ -217,3 +217,6 @@ comment.txt
 
 # Ralph Loop state
 .claude/.ralph-loop.local.md
+
+# 媒体下载 / 运行时产物
+output/
