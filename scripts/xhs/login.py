@@ -145,74 +145,47 @@ def fetch_qrcode(page: Page) -> tuple[bytes, str, bool]:
 
 
 def _decode_qr_content(png_bytes: bytes) -> str | None:
-    """通过 goqr.me read API 解码二维码内容。
+    """本地解码二维码内容（zxing-cpp + Pillow，不经过任何网络请求）。
+
+    此前的实现会把登录二维码图片上传到第三方服务 api.qrserver.com 解码，
+    这意味着小红书的登录 URL（短时有效的登录凭证）会经过小红书官方域名以外的
+    第三方服务器。改为纯本地解码以彻底消除这条数据外流路径。
 
     Returns:
         解码后的文本（通常是登录 URL），失败返回 None。
     """
-    import http.client
-
-    boundary = "----XhsQrBoundary"
-    body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file";'
-        f' filename="qr.png"\r\n'
-        f"Content-Type: image/png\r\n\r\n"
-    ).encode() + png_bytes + f"\r\n--{boundary}--\r\n".encode()
+    import io
 
     try:
-        conn = http.client.HTTPSConnection(
-            "api.qrserver.com", timeout=5
-        )
-        conn.request(
-            "POST",
-            "/v1/read-qr-code/",
-            body=body,
-            headers={
-                "Content-Type": (
-                    f"multipart/form-data; boundary={boundary}"
-                ),
-            },
-        )
-        resp = conn.getresponse()
-        if resp.status != 200:
-            return None
-        result = json.loads(resp.read().decode())
-        data = result[0]["symbol"][0].get("data")
-        return data if data else None
+        import zxingcpp
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(png_bytes))
+        barcode = zxingcpp.read_barcode(image, formats=zxingcpp.BarcodeFormat.QRCode)
+        return barcode.text if barcode is not None else None
     except Exception:
-        logger.debug("goqr.me 解码失败，将使用 base64 fallback")
+        logger.debug("本地二维码解码失败，登录链接将不可用（不影响扫码登录）")
         return None
 
 
 def make_qrcode_url(
     png_bytes: bytes,
 ) -> tuple[str, str | None]:
-    """生成二维码展示 URL 和登录链接。
+    """生成二维码展示 URL 和登录链接（完全本地处理，不发起任何网络请求）。
 
-    通过 goqr.me read API 解码 QR 内容，构造 API 图片 URL
-    （~270 字符）和小红书官方登录链接。
+    image_url 直接复用小红书页面自身渲染的二维码图片（base64 data URL），
+    login_url 通过本地解码获得。两者都不会离开本机。
 
     Returns:
         (image_url, login_url)
-        - image_url: 可用于 markdown 图片的 URL
-        - login_url: 小红书官方登录链接（解码失败时为 None）
+        - image_url: base64 data URL，可直接用于 markdown 图片展示
+        - login_url: 小红书官方登录链接（本地解码失败时为 None）
     """
     import base64
-    import urllib.parse
 
-    qr_content = _decode_qr_content(png_bytes)
-    if qr_content:
-        image_url = (
-            "https://api.qrserver.com/v1/create-qr-code/"
-            "?size=300x300&data="
-            + urllib.parse.quote(qr_content, safe="")
-        )
-        return image_url, qr_content
-
-    # fallback: base64 data URL
-    b64 = base64.b64encode(png_bytes).decode()
-    return "data:image/png;base64," + b64, None
+    login_url = _decode_qr_content(png_bytes)
+    image_url = "data:image/png;base64," + base64.b64encode(png_bytes).decode()
+    return image_url, login_url
 
 
 def save_qrcode_to_file(png_bytes: bytes) -> str:

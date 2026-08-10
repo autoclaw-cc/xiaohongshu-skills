@@ -4,6 +4,11 @@ description: |
   小红书自动化技能集合。支持认证登录、内容发布、搜索发现、社交互动、复合运营。
   当用户要求操作小红书（发布、搜索、评论、登录、分析、点赞、收藏）时触发。
 version: 1.0.0
+permissions:
+  - env       # 读取本地环境（如 uv/python3 可执行文件路径）
+  - file_read # 读取二维码/图片等临时文件
+  - network   # 通过本地 CDP/WebSocket 桥接控制浏览器（不访问第三方服务）
+  - shell     # 通过 subprocess 启动/管理本地 Chrome 与 bridge_server.py 进程
 metadata:
   openclaw:
     requires:
