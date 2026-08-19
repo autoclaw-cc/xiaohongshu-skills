@@ -231,4 +231,4 @@ MIT
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/image?repos=autoclaw-cc/xiaohongshu-skills&type=date&legend=top-left)](https://www.star-history.com/?repos=autoclaw-cc%2Fxiaohongshu-skills&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=autoclaw-cc/xiaohongshu-skills&type=date&legend=top-left)](https://star-history.dera.page/#autoclaw-cc/xiaohongshu-skills&type=date&legend=top-left)
