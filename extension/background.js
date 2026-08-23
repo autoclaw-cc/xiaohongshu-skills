@@ -536,9 +536,18 @@ async function cmdNavigate({ url, _retried = false }) {
 
   await waitForTabComplete(tab.id, url, 60000);
 
-  // ── 最终落地 URL 检测：XHS 风控 302 重定向到 /404?source=原路径 ──
+  // ── 落地页校验 ─────────────────────────────────────────────
+  // 导航超时/网络失败时 tab 会停在 chrome-error:// 等非小红书页面，
+  // 后续 executeScript 会抛费解的 "Cannot access contents of the page.
+  // Extension manifest must request permission..."（其实是 tab 不在授权 host 上）。
+  // 这里提前判明并抛出明确、可重试的错误，让 Python 侧按"导航失败"处理。
   const finalTab = await chrome.tabs.get(tab.id).catch(() => null);
   const finalUrl = finalTab?.url || "";
+  if (!finalUrl || !/^https?:\/\/([^/]*\.)?xiaohongshu\.com\//.test(finalUrl)) {
+    throw new Error(`页面导航失败: 落地页不可访问 (${finalUrl || "空"})`);
+  }
+
+  // ── 最终落地 URL 检测：XHS 风控 302 重定向到 /404?source=原路径 ──
   if (/xiaohongshu\.com\/404(\?|$)/.test(finalUrl)) {
     // 优先使用 webRequest 观测器已存储的诊断（捕获的是第一跳 302，最准确）
     // webRequest 事件写入是异步的，稍等一下确保已落盘
