@@ -16,7 +16,7 @@
 | **xhs-auth** | 认证管理 | 登录检查、扫码登录、手机验证码登录 |
 | **xhs-publish** | 内容发布 | 图文 / 视频 / 长文发布、定时发布、分步预览 |
 | **xhs-explore** | 内容发现 | 关键词搜索、笔记详情、用户主页、首页推荐 |
-| **xhs-interact** | 社交互动 | 评论、回复、点赞、收藏 |
+| **xhs-interact** | 社交互动 | 评论、回复、点赞、收藏、文字私信 |
 | **xhs-content-ops** | 复合运营 | 竞品分析、热点追踪、批量互动、内容创作 |
 
 支持**连贯操作** — 你可以用自然语言下达复合指令，Agent 会自动串联多个技能完成任务。例如：
@@ -88,7 +88,7 @@ uv sync
 > "帮我发一条图文笔记，标题是…，配图是…"
 
 **社交互动：**
-> "给这条笔记点赞" / "收藏这条帖子" / "评论：写得太好了"
+> "给这条笔记点赞" / "收藏这条帖子" / "评论：写得太好了" / "给指定账号发一条私信"
 
 **复合操作：**
 > "搜索竞品账号最近的爆款笔记，分析他们的选题方向"
@@ -145,6 +145,26 @@ python scripts/cli.py post-comment --feed-id FEED_ID --xsec-token XSEC_TOKEN --c
 
 > 第一次运行时，若 Chrome 未打开，CLI 会自动启动它。
 
+### 文字私信
+
+通过现有 XHS Bridge 操作网页“消息”页面，无需额外安装浏览器扩展。先确认登录，再通过已加载的单人会话查询收件人的用户 ID（不是小红书号）：
+
+```bash
+python scripts/cli.py check-login
+python scripts/cli.py list-conversations --name "收件人完整昵称"
+python scripts/cli.py fill-direct-message \
+  --user-id USER_ID --expected-name "收件人完整昵称" \
+  --content-file /absolute/path/message.txt
+# 已有用户授权后发送；也可直接发送而不先填写
+python scripts/cli.py send-direct-message \
+  --user-id USER_ID --expected-name "收件人完整昵称" \
+  --content-file /absolute/path/message.txt --confirm
+```
+
+正文为 UTF-8 文件，最多 1000 个 UTF-16 编码单元。命令同时核对用户 ID 与昵称，保护不同的已有草稿，并拒绝与最近一条己方消息相同的正文。`sent` 表示网页取得服务端消息标识，不代表对方已读。`failed` 或 `unknown` 均不自动重试；特别是 `unknown` 时应先查看会话，消息可能已发出。查询仅覆盖已加载会话；同名账号必须核实后再发送。当前支持单人文字私信，平台的消息权限限制仍然适用。
+
+详细流程见 [xhs-interact](skills/xhs-interact/SKILL.md#发送文字私信)。
+
 ## CLI 命令参考
 
 | 子命令 | 说明 |
@@ -160,6 +180,9 @@ python scripts/cli.py post-comment --feed-id FEED_ID --xsec-token XSEC_TOKEN --c
 | `reply-comment` | 回复指定评论 |
 | `like-feed` | 点赞 / 取消点赞 |
 | `favorite-feed` | 收藏 / 取消收藏 |
+| `list-conversations` | 查询已加载的单人会话及用户 ID |
+| `fill-direct-message` | 填写文字私信，仅预览 |
+| `send-direct-message` | 授权后发送文字私信并核对结果 |
 | `publish` | 一步发布图文 |
 | `publish-video` | 一步发布视频 |
 | `fill-publish` | 填写图文表单（不发布，供预览） |

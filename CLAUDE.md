@@ -14,6 +14,7 @@ uv sync                    # 安装依赖
 uv run ruff check .        # Lint 检查
 uv run ruff format .       # 代码格式化
 uv run pytest              # 运行测试
+node tests/direct_message.test.cjs  # 私信网页脚本的控件与事件测试（无需 npm 依赖）
 ```
 
 ## 架构
@@ -67,6 +68,9 @@ python scripts/cli.py publish --title-file t.txt --content-file c.txt --images p
 | `reply-comment` | reply_comment_in_feed | 互动 |
 | `like-feed` | like_feed | 互动 |
 | `favorite-feed` | favorite_feed | 互动 |
+| `list-conversations` | — | 私信会话查询 |
+| `fill-direct-message` | — | 私信填写预览 |
+| `send-direct-message` | — | 文字私信发送（需要 `--confirm`） |
 | `publish` | publish_content | 发布 |
 | `publish-video` | publish_with_video | 发布 |
 | `fill-publish` | — | 分步发布（图文填写） |

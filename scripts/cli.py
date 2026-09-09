@@ -826,6 +826,42 @@ def cmd_publish_video(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_list_conversations(args: argparse.Namespace) -> None:
+    """查询已加载的单人私信会话。"""
+    from xhs.direct_message import list_conversations
+
+    browser, page = _connect(args)
+    try:
+        _output(list_conversations(page, args.name))
+    finally:
+        browser.close()
+
+
+def cmd_direct_message(args: argparse.Namespace) -> None:
+    """填写预览，或在用户授权后发送文字私信。"""
+    from xhs.direct_message import (
+        DirectMessageError,
+        fill_direct_message,
+        read_message_file,
+        send_direct_message,
+    )
+
+    if args.command == "send-direct-message" and not args.confirm:
+        raise DirectMessageError("发送私信需要 --confirm；仅预览请用 fill-direct-message")
+    content = read_message_file(args.content_file)
+    browser, page = _connect(args)
+    try:
+        if args.command == "fill-direct-message":
+            result = fill_direct_message(page, args.user_id, args.expected_name, content)
+        else:
+            result = send_direct_message(
+                page, args.user_id, args.expected_name, content, confirmed=args.confirm
+            )
+        _output(result, exit_code=0 if result.get("success") else 2)
+    finally:
+        browser.close()
+
+
 # ─── 参数解析 ──────────────────────────────────────────────────────────────────
 
 
@@ -841,6 +877,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    sub = subparsers.add_parser("list-conversations", help="列出已加载的单人私信会话")
+    sub.add_argument("--name", default="", help="按完整昵称精确筛选，不读取消息正文")
+    sub.set_defaults(func=cmd_list_conversations)
+
+    for command, help_text in [
+        ("fill-direct-message", "填写文字私信，仅预览不发送"),
+        ("send-direct-message", "发送文字私信并核对结果"),
+    ]:
+        sub = subparsers.add_parser(command, help=help_text)
+        sub.add_argument("--user-id", required=True, help="收件人用户 ID（不是昵称或小红书号）")
+        sub.add_argument("--expected-name", required=True, help="收件人完整昵称，用于交叉核对")
+        sub.add_argument("--content-file", required=True, help="UTF-8 私信正文文件的绝对路径")
+        if command == "send-direct-message":
+            sub.add_argument("--confirm", action="store_true", help="确认已有用户授权发送")
+        sub.set_defaults(func=cmd_direct_message)
 
     # check-login
     sub = subparsers.add_parser("check-login", help="检查登录状态")
@@ -1043,6 +1095,10 @@ def main() -> None:
     try:
         args.func(args)
     except Exception as e:
+        from xhs.errors import NotLoggedInError
+
+        if isinstance(e, NotLoggedInError):
+            _output({"success": False, "error": str(e)}, exit_code=1)
         logger.error("执行失败: %s", e, exc_info=True)
         _output({"success": False, "error": str(e)}, exit_code=2)
 
