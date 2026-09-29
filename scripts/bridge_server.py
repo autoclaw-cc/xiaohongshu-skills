@@ -33,7 +33,7 @@ class BridgeServer:
     async def handle(self, ws: ServerConnection) -> None:
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=10)
-        except (asyncio.TimeoutError, Exception) as e:
+        except Exception as e:
             logger.warning("握手超时或失败: %s", e)
             return
 
@@ -80,13 +80,15 @@ class BridgeServer:
     async def _handle_cli(self, ws: ServerConnection, msg: dict) -> None:
         # 特殊命令：查询 server/extension 状态，无需转发
         if msg.get("method") == "ping_server":
-            await ws.send(json.dumps({
-                "result": {"extension_connected": self._extension_ws is not None}
-            }))
+            await ws.send(
+                json.dumps({"result": {"extension_connected": self._extension_ws is not None}})
+            )
             return
 
         if not self._extension_ws:
-            await ws.send(json.dumps({"error": "Extension 未连接，请确认浏览器已安装并启用 XHS Bridge 扩展"}))
+            await ws.send(
+                json.dumps({"error": "Extension 未连接，请确认浏览器已安装并启用 XHS Bridge 扩展"})
+            )
             return
 
         msg_id = str(uuid.uuid4())
@@ -101,7 +103,7 @@ class BridgeServer:
         try:
             result = await asyncio.wait_for(future, timeout=90.0)
             await ws.send(json.dumps(result))
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._pending.pop(msg_id, None)
             await ws.send(json.dumps({"error": "命令执行超时（90s）"}))
         except ConnectionError as e:

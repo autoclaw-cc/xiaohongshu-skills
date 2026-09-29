@@ -26,13 +26,11 @@ from .selectors import (
     ORIGINAL_SWITCH,
     ORIGINAL_SWITCH_CARD,
     POPOVER,
-    PUBLISH_BUTTON,
     SCHEDULE_SWITCH,
     TAG_FIRST_ITEM,
     TAG_TOPIC_CONTAINER,
     TITLE_INPUT,
     TITLE_MAX_SUFFIX,
-    UPLOAD_CONTENT,
     UPLOAD_INPUT,
     VISIBILITY_DROPDOWN,
     VISIBILITY_OPTIONS,
@@ -365,7 +363,8 @@ def _click_publish_tab(page: Page, tab_name: str) -> None:
 
                 // 真 tab：有 data-hp-bound + 无 hp 陷阱属性 + 在视口里
                 for (const t of tabs) {{
-                    if (t.hasAttribute('data-hp-kind') || t.hasAttribute('button-hp-installed')) continue;
+                    if (t.hasAttribute('data-hp-kind') ||
+                        t.hasAttribute('button-hp-installed')) continue;
                     if (!t.hasAttribute('data-hp-bound')) continue;
                     const title = t.querySelector('span.title');
                     if (!title || title.textContent.trim() !== name) continue;
@@ -377,7 +376,8 @@ def _click_publish_tab(page: Page, tab_name: str) -> None:
 
                 // 兜底 1：无 hp 陷阱属性 + 在视口内（兼容 XHS 未来去掉 data-hp-bound）
                 for (const t of tabs) {{
-                    if (t.hasAttribute('data-hp-kind') || t.hasAttribute('button-hp-installed')) continue;
+                    if (t.hasAttribute('data-hp-kind') ||
+                        t.hasAttribute('button-hp-installed')) continue;
                     const title = t.querySelector('span.title');
                     if (!title || title.textContent.trim() !== name) continue;
                     const r = t.getBoundingClientRect();
@@ -401,7 +401,8 @@ def _click_publish_tab(page: Page, tab_name: str) -> None:
                         // 找视口内 + 无 hp 陷阱 + active 的 tab，取它的 title
                         const tabs = document.querySelectorAll({json.dumps(CREATOR_TAB)});
                         for (const t of tabs) {{
-                            if (t.hasAttribute('data-hp-kind') || t.hasAttribute('button-hp-installed')) continue;
+                            if (t.hasAttribute('data-hp-kind') ||
+                                t.hasAttribute('button-hp-installed')) continue;
                             if (!t.classList.contains('active')) continue;
                             const r = t.getBoundingClientRect();
                             if (r.left < -1000 || r.top < -1000) continue;
@@ -585,6 +586,9 @@ def _find_content_element(page: Page) -> str:
     if page.has_element(CONTENT_EDITOR):
         return CONTENT_EDITOR
 
+    if page.has_element('[role="textbox"][contenteditable="true"]'):
+        return '[role="textbox"][contenteditable="true"]'
+
     # 查找带 placeholder 的 p 元素的 textbox 父元素
     found = page.evaluate(
         """
@@ -637,22 +641,65 @@ def _check_content_max_length(page: Page) -> None:
 
 
 def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
-    """输入标签。"""
-    time.sleep(1)
-
-    # 先记录当前段落数（insertParagraph 之前），之后用于精确定位正文最后一段
-    # 注意：必须在 insertParagraph 之前记录，否则 para_count_before 会包含新增的 tags 行
-    para_count_before = int(page.evaluate(
-        f'document.querySelector("{content_selector}").querySelectorAll("p").length'
-    ) or 1)
-
-    # 用 evaluate 直接 focus 编辑器、光标移到末尾并换行一次
-    # 避免 click_element 因 isTrusted=false 无法真正 focus Quill 编辑器的问题
+    """逐个插入话题，并在全部操作结束后确认每个话题仍然存在。"""
+    tags = list(dict.fromkeys(tag.strip().lstrip("#") for tag in tags))
+    if not tags or any(not tag for tag in tags):
+        raise PublishError("话题名称不能为空")
+    if len(tags) > 10:
+        raise PublishError("话题数量不能超过 10 个")
+    _focus_editor_end(page, content_selector)
     page.evaluate(
         f"""
         (() => {{
-            const el = document.querySelector("{content_selector}");
-            if (!el) return;
+            const el = document.querySelector({json.dumps(content_selector)});
+            if (!el) throw new Error('正文编辑器不存在');
+            document.execCommand("insertParagraph", false, null);
+        }})()
+        """
+    )
+    time.sleep(0.5)
+    for tag in tags:
+        _input_single_tag(page, content_selector, tag)
+
+    # 不再回到正文中间插入换行，避免事后改变编辑器选区及话题节点。
+    _assert_topics_preserved(page, content_selector, tags)
+
+
+def _read_editor_topics(page: Page, content_selector: str) -> list[dict]:
+    """读取实际 Tiptap 话题元数据，不把隐藏的 [话题]# 后缀算入名称。"""
+    result = page.evaluate(
+        f"""
+        (() => {{
+            const el = document.querySelector({json.dumps(content_selector)});
+            if (!el) throw new Error('正文编辑器不存在');
+            return Array.from(el.querySelectorAll('[data-topic]')).map(node => {{
+                try {{ return JSON.parse(node.getAttribute('data-topic')); }}
+                catch (_) {{ return null; }}
+            }}).filter(topic => topic && topic.id && topic.name);
+        }})()
+        """
+    )
+    if not isinstance(result, list):
+        raise PublishError("无法读取编辑器话题元数据")
+    return result
+
+
+def _assert_topics_preserved(page: Page, content_selector: str, tags: list[str]) -> list[dict]:
+    topics = _read_editor_topics(page, content_selector)
+    names = [topic["name"] for topic in topics]
+    if any(names.count(tag) != 1 for tag in tags):
+        raise PublishError("表单话题缺失或重复，已停止发布")
+    logger.info("全部话题保留确认: %s", ", ".join(tags))
+    return topics
+
+
+def _focus_editor_end(page: Page, content_selector: str) -> None:
+    """重新聚焦正文编辑器，并把光标放到全部内容末尾。"""
+    focused = page.evaluate(
+        f"""
+        (() => {{
+            const el = document.querySelector({json.dumps(content_selector)});
+            if (!el) return false;
             el.focus();
             const range = document.createRange();
             range.selectNodeContents(el);
@@ -660,69 +707,160 @@ def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
             const sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
-            document.execCommand("insertParagraph", false, null);
+            return true;
         }})()
         """
     )
-    time.sleep(0.5)
+    if not focused:
+        raise PublishError("标签输入时无法重新定位正文光标")
 
-    for tag in tags:
-        tag = tag.lstrip("#")
-        _input_single_tag(page, content_selector, tag)
 
-    # 输入完所有 tags 后，回到正文最后一段（tags 输入前的最后一段）末尾，按下回车
-    # 用 para_count_before 精确定位，避免 tags 输入后 Quill 自动新增空段导致偏移
-    page.evaluate(
+def _get_editor_tag_state(page: Page, content_selector: str, tag: str) -> dict[str, object]:
+    """读取当前标签在编辑器中的结构状态。"""
+    result = page.evaluate(
         f"""
         (() => {{
-            const el = document.querySelector("{content_selector}");
-            if (!el) return;
-            const paras = el.querySelectorAll("p");
-            // tags 输入前最后一段的索引 = para_count_before - 1
-            const lastContent = paras[{para_count_before} - 1];
-            if (!lastContent) return;
-            el.focus();
-            const range = document.createRange();
-            range.selectNodeContents(lastContent);
-            range.collapse(false);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-            document.execCommand("insertParagraph", false, null);
+            const el = document.querySelector({json.dumps(content_selector)});
+            if (!el) return null;
+            const expected = {json.dumps(tag)};
+            const candidates = Array.from(el.querySelectorAll('[data-topic]')).filter((node) => {{
+                try {{
+                    const topic = JSON.parse(node.getAttribute('data-topic'));
+                    return topic.name === expected && Boolean(topic.id);
+                }} catch (_) {{ return false; }}
+            }});
+            return {{
+                html: el.innerHTML,
+                text: el.innerText || el.textContent || '',
+                candidateHtml: [...new Set(candidates.map((node) => node.outerHTML))]
+            }};
         }})()
         """
     )
-    time.sleep(0.3)
+    return result if isinstance(result, dict) else {}
+
+
+def _tag_was_committed(before: dict[str, object], after: dict[str, object], tag: str) -> bool:
+    """判断点击联想后，普通文本是否变成了当前标签的独立编辑器节点。"""
+    before_html = str(before.get("html", ""))
+    after_html = str(after.get("html", ""))
+    after_text = str(after.get("text", ""))
+    before_candidates = before.get("candidateHtml", [])
+    after_candidates = after.get("candidateHtml", [])
+    return (
+        bool(after_html)
+        and after_html != before_html
+        and f"#{tag}" in after_text
+        and isinstance(after_candidates, list)
+        and bool(after_candidates)
+        and after_candidates != before_candidates
+    )
+
+
+def _find_matching_tag_suggestion_position(page: Page, tag: str) -> int:
+    """精确匹配候选名称，标记要真实点击的卡片并返回一基位置。"""
+    result = page.evaluate(
+        f"""
+        (() => {{
+            const container = document.querySelector({json.dumps(TAG_TOPIC_CONTAINER)});
+            if (!container) return 0;
+            const expected = {json.dumps(tag)};
+            const normalize = (value) => (value || '').trim().replace(/^#\\s*/, '');
+            const items = Array.from(container.querySelectorAll({json.dumps(TAG_FIRST_ITEM)}));
+            items.forEach((item) => item.removeAttribute('data-codex-tag-target'));
+            for (let index = 0; index < items.length; index++) {{
+                const item = items[index];
+                const texts = [
+                    item.querySelector('.name')?.textContent || '',
+                    ...(item.innerText || '').split(/\\r?\\n/),
+                    ...Array.from(item.childNodes)
+                        .filter((node) => node.nodeType === Node.TEXT_NODE)
+                        .map((node) => node.textContent || ''),
+                    ...Array.from(item.querySelectorAll('*'))
+                        .filter((node) => node.children.length === 0)
+                        .map((node) => node.textContent || '')
+                ];
+                if (texts.some((text) => normalize(text) === expected)) {{
+                    item.setAttribute('data-codex-tag-target', 'true');
+                    return index + 1;
+                }}
+            }}
+            return 0;
+        }})()
+        """
+    )
+    return int(result) if isinstance(result, (int, float)) else 0
 
 
 def _input_single_tag(page: Page, content_selector: str, tag: str) -> None:
     """输入单个标签。"""
-    # 输入 #
-    page.type_text("#", delay_ms=0)
-    time.sleep(0.3)
+    # 每轮都重新定位光标。点击上一条联想后焦点可能留在下拉层，不能依赖浏览器状态。
+    _focus_editor_end(page, content_selector)
 
-    # 逐字输入标签（随机间隔模拟真实输入）
-    for char in tag:
-        page.type_text(char, delay_ms=0)
-        time.sleep(random.uniform(0.05, 0.12))
+    # 继续当前未完成的话题时，不重复插入同一段 hashtag。
+    pending = page.evaluate(
+        f"""(() => {{
+            const el = document.querySelector({json.dumps(content_selector)});
+            const node = el.querySelector('[data-decoration-id].suggestion');
+            return node ? node.textContent : '';
+        }})()"""
+    )
+    if pending != f"#{tag}":
+        page.type_text("#", delay_ms=0)
+        time.sleep(0.3)
+        for char in tag:
+            page.type_text(char, delay_ms=0)
+            time.sleep(random.uniform(0.05, 0.12))
 
-    # 等待标签联想出现（最多 3 秒）
-    deadline = time.monotonic() + 3.0
+    before_commit = _get_editor_tag_state(page, content_selector, tag)
+
+    # 话题搜索有网络延迟，等待同名结果，不重新输入或重复提交。
+    deadline = time.monotonic() + 20.0
     clicked = False
     while time.monotonic() < deadline:
         time.sleep(0.5)
         if page.has_element(TAG_TOPIC_CONTAINER):
             item_selector = f"{TAG_TOPIC_CONTAINER} {TAG_FIRST_ITEM}"
-            if page.has_element(item_selector):
-                page.click_element(item_selector)
-                logger.info("点击标签联想: %s", tag)
+            position = _find_matching_tag_suggestion_position(page, tag)
+            if page.has_element(item_selector) and position > 0:
+                target_selector = f'{TAG_TOPIC_CONTAINER} [data-codex-tag-target="true"]'
+                selected = page.evaluate(
+                    f"""(() => {{
+                        const item = document.querySelector({json.dumps(target_selector)});
+                        if (!item) return false;
+                        const name = item.querySelector('.name') || item;
+                        // 保留正文选区，不先 focus 或滚动浮层。
+                        // Tiptap 候选需要 mousedown 阶段处理选区及话题提交。
+                        for (const type of ['mousedown', 'mouseup', 'click']) {{
+                            name.dispatchEvent(new MouseEvent(type, {{
+                                bubbles: true, cancelable: true, button: 0
+                            }}));
+                        }}
+                        return true;
+                    }})()"""
+                )
+                if selected is not True:
+                    raise PublishError(f"话题候选已消失: #{tag}")
+                logger.info("选择同名话题: %s", tag)
                 clicked = True
                 break
 
     if not clicked:
-        # 没有联想，直接空格
-        logger.warning("未找到标签联想，直接输入空格: %s", tag)
-        page.type_text(" ", delay_ms=0)
+        raise PublishError(f"未找到匹配的标签联想，停止发布: #{tag}")
+
+    # 成功以实际 data-topic 名称及 ID 为准；装饰 span 和纯文本均不算。
+    commit_deadline = time.monotonic() + 3.0
+    while time.monotonic() < commit_deadline:
+        after_commit = _get_editor_tag_state(page, content_selector, tag)
+        if _tag_was_committed(before_commit, after_commit, tag):
+            break
+        time.sleep(0.2)
+    else:
+        raise PublishError(f"标签联想点击未生效，停止发布: #{tag}")
+
+    # 把光标显式放到已提交话题之后；不能依赖点击后的焦点。
+    _focus_editor_end(page, content_selector)
+    page.type_text(" ", delay_ms=0)
 
     time.sleep(0.8)
 

@@ -49,7 +49,6 @@ def _wait_for_countdown(page: Page, timeout: float = 5.0) -> None:
     raise RateLimitError()
 
 
-
 def get_current_user_nickname(page: Page) -> str:
     """获取当前登录用户的真实昵称，失败时返回空字符串（best-effort）。
 
@@ -63,7 +62,8 @@ def get_current_user_nickname(page: Page) -> str:
 
         # 从导航栏"我"的链接取个人主页 URL（含 /user/profile/<user_id>）
         profile_href = page.evaluate(
-            f"document.querySelector({json.dumps(USER_PROFILE_NAV_LINK)})?.getAttribute('href') || ''"
+            f"document.querySelector({json.dumps(USER_PROFILE_NAV_LINK)})"
+            "?.getAttribute('href') || ''"
         )
         if not profile_href:
             return ""
@@ -130,15 +130,14 @@ def fetch_qrcode(page: Page) -> tuple[bytes, str, bool]:
     page.wait_for_element(QRCODE_IMG, timeout=15.0)
 
     # img.src 本身就是 data:image/png;base64,...，直接读取
-    src = page.evaluate(
-        f"document.querySelector({json.dumps(QRCODE_IMG)})?.src || ''"
-    )
+    src = page.evaluate(f"document.querySelector({json.dumps(QRCODE_IMG)})?.src || ''")
     if not src or "base64," not in src:
         raise RuntimeError("二维码图片 src 读取失败")
 
     b64_str = src.split("base64,", 1)[1]
 
     import base64
+
     png_bytes = base64.b64decode(b64_str)
 
     return png_bytes, b64_str, False
@@ -154,24 +153,24 @@ def _decode_qr_content(png_bytes: bytes) -> str | None:
 
     boundary = "----XhsQrBoundary"
     body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file";'
-        f' filename="qr.png"\r\n'
-        f"Content-Type: image/png\r\n\r\n"
-    ).encode() + png_bytes + f"\r\n--{boundary}--\r\n".encode()
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file";'
+            f' filename="qr.png"\r\n'
+            f"Content-Type: image/png\r\n\r\n"
+        ).encode()
+        + png_bytes
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
 
     try:
-        conn = http.client.HTTPSConnection(
-            "api.qrserver.com", timeout=5
-        )
+        conn = http.client.HTTPSConnection("api.qrserver.com", timeout=5)
         conn.request(
             "POST",
             "/v1/read-qr-code/",
             body=body,
             headers={
-                "Content-Type": (
-                    f"multipart/form-data; boundary={boundary}"
-                ),
+                "Content-Type": (f"multipart/form-data; boundary={boundary}"),
             },
         )
         resp = conn.getresponse()
@@ -205,8 +204,7 @@ def make_qrcode_url(
     if qr_content:
         image_url = (
             "https://api.qrserver.com/v1/create-qr-code/"
-            "?size=300x300&data="
-            + urllib.parse.quote(qr_content, safe="")
+            "?size=300x300&data=" + urllib.parse.quote(qr_content, safe="")
         )
         return image_url, qr_content
 

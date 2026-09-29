@@ -376,15 +376,14 @@ class Page:
 
         在页面执行 JS 生成轨迹，Python 侧控制帧间延迟使时序真实。
         """
-        import math as _math
 
         # 获取视口尺寸
         vw = int(self.evaluate("window.innerWidth || 1280") or 1280)
         vh = int(self.evaluate("window.innerHeight || 800") or 800)
 
-        left   = int(vw * 0.25)
-        right  = int(vw * 0.75)
-        top    = int(vh * 0.20)
+        left = int(vw * 0.25)
+        right = int(vw * 0.75)
+        top = int(vh * 0.20)
         bottom = int(vh * 0.80)
 
         def rand(a: int, b: int) -> int:
@@ -397,7 +396,7 @@ class Page:
         waypoints: list[tuple[int, int, float]] = []  # (x, y, delay_sec)
         cx, cy = rand(left, right), rand(top, top + (bottom - top) // 3)
         line_count = max(3, duration_ms // 600)
-        line_step  = (bottom - top) // line_count
+        line_step = (bottom - top) // line_count
 
         for _ in range(line_count):
             row_end = rand(left + (right - left) // 2, right)

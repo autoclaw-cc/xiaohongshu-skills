@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import random
@@ -129,10 +130,8 @@ def get_feed_detail(
     sleep_random(800, 1500)
 
     # 模拟阅读鼠标轨迹（同步进行，增加行为真实性）
-    try:
+    with contextlib.suppress(Exception):
         page.simulate_reading_mouse(random.randint(2000, 4000))
-    except Exception:
-        pass
 
     # 检查页面可访问性（扫码验证时自动等待重试）
     _check_page_accessible(page, url, keyword)
@@ -187,13 +186,10 @@ def _check_page_accessible(page: Page, url: str = "", keyword: str = "篮球") -
             text = retry_text.strip()
         else:
             # ── Level 2：搜索跳转 ──
-            search_url = (
-                "https://www.xiaohongshu.com/search_result?"
-                + urllib.parse.urlencode({"keyword": keyword, "type": "51"})
+            search_url = "https://www.xiaohongshu.com/search_result?" + urllib.parse.urlencode(
+                {"keyword": keyword, "type": "51"}
             )
-            logger.warning(
-                "Level-1 失败，Level-2 重试：搜索「%s」后再访问目标...", keyword
-            )
+            logger.warning("Level-1 失败，Level-2 重试：搜索「%s」后再访问目标...", keyword)
             time.sleep(5 + random.random() * 5)
             page.navigate(search_url)
             page.wait_for_load()
@@ -427,8 +423,14 @@ def _human_scroll(
         "({scrollTop: window.pageYOffset || document.documentElement.scrollTop || 0,"
         " viewportHeight: window.innerHeight})"
     )
-    before_top = int(state.get("scrollTop", 0)) if isinstance(state, dict) else page.get_scroll_top()
-    viewport_height = int(state.get("viewportHeight", 768)) if isinstance(state, dict) else page.get_viewport_height()
+    before_top = (
+        int(state.get("scrollTop", 0)) if isinstance(state, dict) else page.get_scroll_top()
+    )
+    viewport_height = (
+        int(state.get("viewportHeight", 768))
+        if isinstance(state, dict)
+        else page.get_viewport_height()
+    )
 
     base_ratio = get_scroll_ratio(speed)
     if large_mode:
@@ -527,7 +529,8 @@ def _check_page_state(page: Page) -> dict:
         f"(function(){{"
         f"  var count = document.querySelectorAll({sel_parent}).length;"
         f"  var noText = (document.querySelector({sel_no}) || {{}}).textContent || '';"
-        f"  var endText = ((document.querySelector({sel_end}) || {{}}).textContent || '').toUpperCase();"
+        f"  var endText = ((document.querySelector({sel_end}) || {{}}).textContent || '')"
+        ".toUpperCase();"
         f"  return {{count: count,"
         f"    no_comments: noText.indexOf('这是一片荒地') >= 0,"
         f"    at_end: endText.indexOf('THE END') >= 0 || endText.indexOf('THEEND') >= 0}};"

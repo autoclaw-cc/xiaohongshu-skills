@@ -258,7 +258,7 @@ class FeedDetail:
     xsec_token: str = ""
     title: str = ""
     desc: str = ""
-    body: str = ""   # DOM 正文（干净文本，不含 [话题] 标记）
+    body: str = ""  # DOM 正文（干净文本，不含 [话题] 标记）
     tags: list[str] = field(default_factory=list)  # 话题标签列表
     type: str = ""
     time: int = 0

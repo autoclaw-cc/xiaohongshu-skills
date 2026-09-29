@@ -42,7 +42,7 @@ class BridgePage:
             raise CDPError(f"无法连接到 bridge server（ws://localhost:9333）: {e}") from e
 
         resp = json.loads(raw)
-        if "error" in resp and resp["error"]:
+        if resp.get("error"):
             raise CDPError(f"Bridge 错误: {resp['error']}")
         return resp.get("result")
 

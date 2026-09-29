@@ -8,8 +8,6 @@ import time
 
 from .cdp import Page
 from .errors import NoFeedsError
-from .human import sleep_random
-from .selectors import FILTER_BUTTON, FILTER_PANEL
 from .types import Feed, FilterOption
 from .urls import make_search_url
 
@@ -140,12 +138,13 @@ def _apply_filters(page: Page, filters: list[tuple[int, str]]) -> None:
     → 等待搜索结果刷新。
     避免多次 WebSocket 连接导致面板关闭的时序问题。
     """
-    filter_js_list = ", ".join(
-        f'[{idx}, {json.dumps(text)}]' for idx, text in filters
-    )
+    filter_js_list = ", ".join(f"[{idx}, {json.dumps(text)}]" for idx, text in filters)
 
     # 记录当前 feeds 快照，用于检测结果是否已刷新
-    snapshot_js = "JSON.stringify(window.__INITIAL_STATE__?.search?.feeds?.value ?? window.__INITIAL_STATE__?.search?.feeds?._value ?? null)"
+    snapshot_js = (
+        "JSON.stringify(window.__INITIAL_STATE__?.search?.feeds?.value ?? "
+        "window.__INITIAL_STATE__?.search?.feeds?._value ?? null)"
+    )
 
     script = f"""
 (() => {{
