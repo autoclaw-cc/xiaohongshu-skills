@@ -37,7 +37,9 @@ class BridgePage:
         try:
             with ws_client.connect(self._bridge_url, max_size=50 * 1024 * 1024) as ws:
                 ws.send(json.dumps(msg, ensure_ascii=False))
-                raw = ws.recv(timeout=90)
+                # 正文是逐字输入的，900 字左右会超过旧的 90s 硬编码上限。
+                # 默认放宽到 300s，可用 XHS_CMD_TIMEOUT 覆盖。
+                raw = ws.recv(timeout=float(os.environ.get("XHS_CMD_TIMEOUT", "300")))
         except OSError as e:
             raise CDPError(f"无法连接到 bridge server（ws://localhost:9333）: {e}") from e
 

@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 import uuid
 from typing import Any
@@ -23,6 +24,10 @@ import websockets
 from websockets.server import ServerConnection
 
 logger = logging.getLogger("xhs-bridge")
+
+# 命令执行的墙钟上限。正文是逐字输入的，~900 字在 90s 内很勉强；
+# 默认放宽到 300s，可用 XHS_CMD_TIMEOUT 覆盖。
+CMD_TIMEOUT = float(os.environ.get("XHS_CMD_TIMEOUT", "300"))
 
 
 class BridgeServer:
@@ -99,11 +104,11 @@ class BridgeServer:
         await self._extension_ws.send(json.dumps(msg))
 
         try:
-            result = await asyncio.wait_for(future, timeout=90.0)
+            result = await asyncio.wait_for(future, timeout=CMD_TIMEOUT)
             await ws.send(json.dumps(result))
         except asyncio.TimeoutError:
             self._pending.pop(msg_id, None)
-            await ws.send(json.dumps({"error": "命令执行超时（90s）"}))
+            await ws.send(json.dumps({"error": f"命令执行超时（{int(CMD_TIMEOUT)}s）"}))
         except ConnectionError as e:
             await ws.send(json.dumps({"error": str(e)}))
 
