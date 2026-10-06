@@ -302,28 +302,112 @@ def click_publish_button(page: Page) -> None:
     raise PublishError(f"发布失败：code={code} msg={msg!r}")
 
 
-def save_as_draft(page: Page) -> None:
-    """点击「暂存离开」按钮保存草稿。"""
-    clicked = page.evaluate(
-        """
-        (() => {
-            const buttons = document.querySelectorAll('button.custom-button');
-            for (const btn of buttons) {
-                if (btn.textContent.trim() === '暂存离开') {
-                    btn.click();
-                    return true;
-                }
-            }
-            return false;
-        })()
-        """
+def _draft_editor_snapshot(page: Page) -> dict | None:
+    return page.evaluate("""(() => {
+        const el=document.querySelector('div[contenteditable="true"][role="textbox"]');
+        if(!el) return null;
+        return {title:document.querySelector('input[placeholder="填写标题会有更多赞哦"]')?.value,
+            body:el.textContent.replace(/\\s/g,''),
+            tags:Array.from(el.querySelectorAll('.tiptap-topic'))
+                .map(e=>JSON.parse(e.getAttribute('data-topic')).name),
+            images:document.querySelectorAll('.img-preview-area .pr').length};
+    })()""")
+
+
+def save_as_draft(page: Page, *, verify: bool = False) -> dict:
+    """暂存一次并确认列表；verify=True 时重开图文草稿核验。
+
+    默认保留在草稿列表；图文核验成功后停留在恢复编辑页。
+    核验失败不重试暂存，避免生成重复草稿。
+    """
+    expected = (
+        _draft_editor_snapshot(page)
+        if verify
+        else {
+            "title": page.evaluate(
+                "document.querySelector('input[placeholder=\"填写标题会有更多赞哦\"]')?.value"
+            )
+        }
     )
-    if clicked:
-        time.sleep(2)
-        logger.info("已点击「暂存离开」，内容已保存到草稿箱")
-    else:
-        logger.warning("未找到「暂存离开」按钮")
-        raise PublishError("未找到「暂存离开」按钮")
+    if not expected or not expected.get("title"):
+        raise PublishError("必须先填写草稿标题")
+    if verify and not expected.get("images"):
+        raise PublishError("--verify 仅支持有配图的图文草稿，未执行暂存")
+    click = page._call("click_save_draft", {"expectedTitle": expected["title"]})
+    deadline = time.monotonic() + 20
+    matches = None
+    while time.monotonic() < deadline:
+        matches = page.evaluate(f"""(() => {{
+            if(!document.body.innerText.includes('草稿存储于当前使用的浏览器本地')) return null;
+            return Array.from(document.querySelectorAll('.draft-item')).filter(e=>
+                e.querySelector('.draft-title-text')?.textContent.trim()
+                    ==={json.dumps(expected["title"])})
+                .map(e=>({{id:e.getAttribute('data-draft-id')}}));
+        }})()""")
+        if matches:
+            break
+        time.sleep(0.3)
+    if not matches:
+        raise PublishError("点击后未确认目标草稿列表；不得自动重复点击")
+    if len(matches) != 1:
+        raise PublishError("存在多个同标题草稿，无法唯一核验，请人工检查")
+    draft_id = matches[0]["id"]
+    if not draft_id:
+        raise PublishError("草稿缺少ID，无法唯一核验，请人工检查")
+    if not verify:
+        return {
+            "draft_id": draft_id,
+            "storage": "current_browser_local",
+            "list_confirmed": True,
+            "reopened": False,
+            "publish": False,
+        }
+    selector = f".draft-item[data-draft-id={json.dumps(draft_id)}] .draft-actions .btn"
+    edit_index = page.evaluate(f"""(() => {{
+        const buttons = Array.from(document.querySelectorAll({json.dumps(selector)}));
+        const edits = buttons.map((e, i) => ({{text:e.textContent.trim(), index:i}}))
+            .filter(e => e.text === '编辑');
+        return edits.length === 1 ? edits[0].index : null;
+    }})()""")
+    if edit_index is None:
+        raise PublishError("未找到唯一草稿编辑入口；草稿已暂存，请人工检查")
+    page._call("click_nth_element", {"selector": selector, "index": edit_index})
+    deadline = time.monotonic() + 20
+    actual = None
+    while time.monotonic() < deadline:
+        actual = _draft_editor_snapshot(page)
+        if actual == expected:
+            break
+        time.sleep(0.3)
+    if actual != expected:
+        raise PublishError("草稿已保存但回读内容不一致，保留页面供检查")
+    deadline = time.monotonic() + 15
+    loaded = False
+    while time.monotonic() < deadline:
+        loaded = page.evaluate(
+            """(() => {
+            const imgs=Array.from(document.querySelectorAll('.img-preview-area .pr img'));
+            return imgs.length === EXPECTED_IMAGES && imgs.every(e=>e.complete && e.naturalWidth>0);
+        })()""".replace("EXPECTED_IMAGES", str(expected["images"]))
+        )
+        if loaded:
+            break
+        time.sleep(0.3)
+    if not loaded:
+        raise PublishError("草稿已恢复，但配图未全部加载，需检查网络或图片")
+    return {
+        "title": actual["title"],
+        "draft_id": draft_id,
+        "images": actual["images"],
+        "topics": len(actual["tags"]),
+        "body_matches": True,
+        "tags_match": True,
+        "images_loaded": True,
+        "click": click,
+        "storage": "current_browser_local",
+        "reopened": True,
+        "publish": False,
+    }
 
 
 # ========== 页面导航 ==========

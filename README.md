@@ -145,6 +145,29 @@ python scripts/cli.py post-comment --feed-id FEED_ID --xsec-token XSEC_TOKEN --c
 
 > 第一次运行时，若 Chrome 未打开，CLI 会自动启动它。
 
+### 保存浏览器本地草稿
+
+```bash
+# 点击一次暂存，并确认草稿列表；成功后留在列表
+python scripts/cli.py save-draft
+
+# 图文草稿：保存后按草稿 ID 重新打开，核验标题、正文、正式话题与配图
+python scripts/cli.py save-draft --verify
+```
+
+暂存按钮兼容当前封闭 Shadow DOM 组件及旧版 `button.custom-button`。
+通过实时布局定位、可用状态和遮挡检查后点击，不使用固定坐标。
+升级此修复后，需要在 `chrome://extensions/` 重新加载 XHS Bridge。
+
+`--verify` 仅支持有标题和配图的图文草稿，成功后停留在恢复编辑页。
+正文比较忽略空白，话题按正式节点名称及顺序比较；配图核验数量及加载状态，
+不校验图片内容或顺序。视频、长文的重开核验尚不支持。
+重复标题、列表未出现、编辑入口不唯一、回读不一致或配图加载失败时停止，
+不自动重试保存；错误不代表草稿未保存，应先人工检查。
+
+草稿仅存储在当前浏览器本地；本修复不保证手机同步、多账号隔离或长期无人值守。
+离线回归测试：`.venv/bin/python -m pytest` 和 `node tests/draft_click.test.cjs`。
+
 ## CLI 命令参考
 
 | 子命令 | 说明 |

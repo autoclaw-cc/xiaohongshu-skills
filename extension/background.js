@@ -9,7 +9,7 @@
  * - get_cookies: chrome.cookies.getAll
  */
 
-importScripts("netlogger.js");
+importScripts("netlogger.js", "draft_click.js");
 netlogInit().catch(e => console.warn("[XHS NetLogger] init failed", e));
 
 const BRIDGE_URL = "ws://localhost:9333";
@@ -133,6 +133,9 @@ async function handleCommand(msg) {
   const { method, params = {} } = msg;
 
   switch (method) {
+    case "click_save_draft":
+      return await cmdDraftClick(params);
+
     // ── 导航 ──
     case "navigate":
       return await cmdNavigate(params);

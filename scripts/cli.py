@@ -631,8 +631,9 @@ def cmd_save_draft(args: argparse.Namespace) -> None:
 
     browser, page = _connect_existing(args)
     try:
-        save_as_draft(page)
-        _output({"success": True, "status": "内容已保存到草稿箱"})
+        verification = save_as_draft(page, verify=args.verify)
+        status = "草稿已保存并重新打开核验" if args.verify else "草稿已保存并确认列表"
+        _output({"success": True, "status": status, "verification": verification})
     finally:
         browser.close()
 
@@ -989,6 +990,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # save-draft
     sub = subparsers.add_parser("save-draft", help="保存为草稿")
+    sub.add_argument("--verify", action="store_true", help="重开图文草稿并核验正文、话题及配图")
     sub.set_defaults(func=cmd_save_draft)
 
     # long-article

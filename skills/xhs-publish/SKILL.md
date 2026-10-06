@@ -162,6 +162,11 @@ python scripts/cli.py click-publish
 python scripts/cli.py save-draft
 ```
 
+图文草稿可使用 `python scripts/cli.py save-draft --verify` 保存并重开核验。
+成功后停留在恢复编辑页，输出正文（忽略空白）、话题、图片数与加载状态。
+默认 `save-draft` 只确认列表；视频/长文不支持 `--verify`。
+保存或核验报错后不要自动重试，应先人工确认草稿列表，避免重复草稿。
+
 > ⚠️ **用户取消时必须调用 `save-draft`**，不得直接关闭 tab 或结束流程。
 > 直接关闭 tab 会导致内容丢失，草稿不会保存到小红书草稿箱。
 
