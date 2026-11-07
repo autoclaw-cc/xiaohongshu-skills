@@ -11,7 +11,7 @@ from .errors import NoFeedsError
 from .human import sleep_random
 from .selectors import FILTER_BUTTON, FILTER_PANEL
 from .types import Feed, FilterOption
-from .urls import make_search_url
+from .urls import BASE_DOMAIN, make_search_url
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,95 @@ _EXTRACT_SEARCH_JS = """
     if (!s?.feeds) return "";
     const data = s.feeds.value !== undefined ? s.feeds.value : s.feeds._value;
     return data ? JSON.stringify(data) : "";
+})()
+"""
+
+# 从 DOM 提取搜索结果的 JS（rednote.com 使用客户端渲染，数据不在 __INITIAL_STATE__ 中）
+_EXTRACT_SEARCH_FROM_DOM_JS = """
+(() => {
+    // rednote.com is client-rendered and its Vue scoped-attribute hash rotates
+    // (data-v-4832212a -> data-v-f1b86190 -> ...), and search links moved from
+    // /explore/{id}?xsec_token= to /search_result/{id}. So anchor on the stable
+    // structural classes (a.cover / a.title / a.author) instead of the hash,
+    // and derive each card by climbing from its cover link. See
+    // references/rednote-dom-extraction.md.
+    const idFrom = (href) => {
+        if (!href) return '';
+        const m = href.match(/\\/(?:explore|search_result)\\/([a-zA-Z0-9]+)/);
+        return m ? m[1] : '';
+    };
+    // Each result card is a <section.note-item> (stable class); fall back to the
+    // element wrapping a single a.cover if the class ever changes.
+    let cards = Array.from(document.querySelectorAll('section.note-item'));
+    if (cards.length === 0) {
+        const seenRoots = new Set();
+        document.querySelectorAll('a.cover').forEach(cover => {
+            let n = cover, best = cover;
+            for (let i = 0; i < 8 && n && n.parentElement; i++) {
+                if (n.parentElement.querySelectorAll('a.cover').length !== 1) break;
+                best = n.parentElement; n = best;
+            }
+            if (!seenRoots.has(best)) { seenRoots.add(best); cards.push(best); }
+        });
+    }
+    const seen = new Set();
+    const feeds = [];
+    cards.forEach(card => {
+        const coverLink = card.querySelector('a.cover') || card.querySelector('a[href*="/explore/"], a[href*="/search_result/"]');
+        if (!coverLink) return;
+
+        // Feed ID: the cover href, or any explore/search_result link in the card.
+        let feedId = idFrom(coverLink.getAttribute('href'));
+        if (!feedId) {
+            const anyLink = card.querySelector('a[href*="/explore/"], a[href*="/search_result/"]');
+            if (anyLink) feedId = idFrom(anyLink.getAttribute('href'));
+        }
+        if (!feedId || seen.has(feedId)) return;
+        seen.add(feedId);
+
+        // xsec_token if the href still carries one (older layout / some routes).
+        let xsecToken = '';
+        const tok = (coverLink.getAttribute('href') || '').match(/xsec_token=([^&]+)/);
+        if (tok) xsecToken = decodeURIComponent(tok[1]);
+
+        const img = coverLink.querySelector('img');
+        const coverUrl = img ? img.src : '';
+
+        const type = card.querySelector('.play-icon') ? 'video' : 'normal';
+
+        const titleEl = card.querySelector('a.title span') || card.querySelector('a.title');
+        const displayTitle = titleEl ? titleEl.textContent.trim() : '';
+
+        const authorLink = card.querySelector('a.author');
+        let userId = '', nickname = '';
+        if (authorLink) {
+            const m = (authorLink.getAttribute('href') || '').match(/profile\\/([a-zA-Z0-9]+)/);
+            if (m) userId = m[1];
+            const nameEl = authorLink.querySelector('.name');
+            if (nameEl) nickname = nameEl.textContent.trim();
+        }
+        if (!nickname) {
+            const nameEl = card.querySelector('.author .name, .name');
+            if (nameEl) nickname = nameEl.textContent.trim();
+        }
+
+        const likeEl = card.querySelector('.like-wrapper .count, .like-wrapper span, .count');
+        const likedCount = likeEl ? likeEl.textContent.trim() : '0';
+
+        feeds.push({
+            id: feedId,
+            xsecToken: xsecToken,
+            modelType: type,
+            noteCard: {
+                type: type,
+                displayTitle: displayTitle,
+                user: { userId: userId, nickname: nickname },
+                interactInfo: { likedCount: likedCount },
+                cover: { url: coverUrl }
+            }
+        });
+    });
+    return JSON.stringify(feeds);
 })()
 """
 
@@ -102,8 +191,17 @@ def search_feeds(
         if internal_filters:
             _apply_filters(page, internal_filters)
 
-    # 提取搜索结果
+    # 提取搜索结果：优先 __INITIAL_STATE__（含标题与 xsec_token），失败再从渲染后的
+    # DOM（section.note-item）抓取（DOM 无 token，仅作兜底）。
     result = page.evaluate(_EXTRACT_SEARCH_JS)
+    if not result or _titled_feed_count(result) == 0:
+        logger.info("__INITIAL_STATE__ 无可用标题，回退到 DOM 提取（section.note-item）...")
+        _wait_for_search_cards(page)
+        dom_result = page.evaluate(_EXTRACT_SEARCH_FROM_DOM_JS)
+        if dom_result and _titled_feed_count(dom_result) >= _titled_feed_count(result or "[]"):
+            result = dom_result
+        elif not result:
+            result = dom_result
     if not result:
         raise NoFeedsError()
 
@@ -121,6 +219,7 @@ def _wait_for_search_feeds(page: Page, timeout: float = 15.0) -> None:
         NoFeedsError: 超时仍无数据。
     """
     deadline = time.monotonic() + timeout
+    last_titled = -1
     while time.monotonic() < deadline:
         result = page.evaluate(_EXTRACT_SEARCH_JS)
         if result:

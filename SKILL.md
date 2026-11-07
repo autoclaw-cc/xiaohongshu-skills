@@ -49,10 +49,24 @@ metadata:
 - 文件路径必须使用绝对路径。
 - CLI 输出为 JSON 格式，结构化呈现给用户。
 - 操作频率不宜过高，保持合理间隔。
+- **长任务 heartbeat**：对于调研、竞品分析、批量搜索/详情抓取等超过 2 分钟的任务，如果用户指定汇报节奏，必须拆小批执行并按时汇报；即使新增结果为 0，也要报告“0、原因、下一步调整”。不要只在任务完成时才说话。
 
 ## 子技能概览
 
 ### xhs-auth — 认证管理
+
+### xhs-explore — 内容发现
+
+### xhs-interact — 社交互动
+
+### xhs-publish — 内容发布
+
+### xhs-content-ops — 复合运营
+
+## 参考文件
+
+- `references/rednote-dom-extraction.md` — rednote.com DOM 提取机制
+- `references/smb-research-methodology.md` — 北美SMB需求研究方法论（搜索策略、质量判断、行业框架）
 
 管理小红书登录状态和多账号切换。
 
@@ -100,7 +114,22 @@ metadata:
 
 组合多步骤完成运营工作流：竞品分析、热点追踪、内容创作、互动管理。
 
-## 快速开始
+## 批量搜索技术栈
+
+**CLI 的 `search-feeds` 在批量场景下不可靠**（bridge 的 `navigate()` 对搜索页经常超时）。大量搜索时使用以下方法：
+
+1. **绕过 Bridge 超时**：不直接 navigate 到搜索页，而是先加载 explore 首页（稳定），再通过 `page.evaluate('window.location.href = "..."')` JS 跳转。详见 `xhs-explore` 技能的"Bridge 搜索超时绕过"章节。
+
+2. **批量脚本**：用 `uv run python3 batch_script.py` 执行，`terminal(background=true, notify_on_complete=true)` 后台运行。模板见 `xhs-explore` 的 `references/batch-search-template.py`。
+
+3. **频率控制**：每轮搜索间隔 12-15s，每次最多 44 条结果。
+
+4. **Google Sheets 输出**：默认 sheet 上限约 1000 行，如需写入超大量数据，先用 `appendDimension` 扩容：
+   ```python
+   svc.spreadsheets().batchUpdate(spreadsheetId=SID, body={'requests':[{
+       'appendDimension': {'sheetId': sheet_id, 'dimension': 'ROWS', 'length': 1000}
+   }]}).execute()
+   ```
 
 ```bash
 # 1. 启动 Chrome
@@ -136,9 +165,68 @@ python scripts/cli.py like-feed \
   --feed-id FEED_ID --xsec-token XSEC_TOKEN
 ```
 
+## rednote.com 适配（强制）
+
+> **用户强制要求使用 rednote.com（XHS_BASE_DOMAIN=rednote.com），禁止回退到 xiaohongshu.com。**
+
+rednote.com 与 xiaohongshu.com 的核心差异：
+
+| 差异 | xiaohongshu.com | rednote.com |
+|------|----------------|-------------|
+| 数据注入方式 | SSR `window.__INITIAL_STATE__` | 客户端渲染（API 异步加载） |
+| 搜索页 DOM | `__INITIAL_STATE__.search.feeds` | `div[data-v-4832212a]` 卡片元素 |
+| 详情页 | `__INITIAL_STATE__.note.noteDetailMap` | **未适配** — 需要 DOM 回退 |
+| 首页 feeds | 正常 | **未适配** — 需要 DOM 回退 |
+| 收藏夹/Board | 桌面版支持 | **桌面版不支持** — 仅限手机 App |
+
+### search-feeds 已适配 DOM 回退
+
+`search.py` 的 `_EXTRACT_SEARCH_FROM_DOM_JS`：rednote 上优先从渲染后的 DOM 提取（`__INITIAL_STATE__.search.feeds` 现在有 id 无标题），锚点用稳定的 `section.note-item`（Vue scoped 哈希会变，勿锚定 `div[data-v-*]`），并等标题渲染后再抓，得到 feed ID、标题、作者、点赞、封面。详情页仍需 xsec_token（搜索 href 已不含），见 `references/rednote-dom-extraction.md`。
+
+### 待适配
+
+- `get-feed-detail` — 详情页需要相同 DOM 回退策略
+
+### 实测坑（2026-09）
+
+- **未登录时可搜索、不可看详情**：`search-feeds` 无需登录即可拿 44 条结果（标题+赞数+作者），但 `get-feed-detail` 报 `Isn't Available` / `PageNotAccessibleError`（未登录时详情被墙），`web_extract` 抓 rednote 详情页也只会拿到 "This content isn't available"。
+- **应对**：只靠搜索结果的标题+互动数提炼玩法和口碑（标题信息量已足够），关键事实（营业时间/预约/停车）一律用官网核实。
+- **首次 check-login 可能 120s 超时**：CLI 自动启动 bridge_server + 等待扩展连接较慢；手动先 `uv run python3 scripts/bridge_server.py`（后台）再跑 CLI 更可靠。
+- `list-feeds` — 首页推荐需要 DOM 回退
+- `favorite-feed` — 状态验证依赖 `__INITIAL_STATE__`，rednote 上会降级为盲点（不验证状态直接点击）
+- Board/收藏夹操作 — rednote 桌面版无此功能，需引导用户用手机 App
+
+### 搜索关键词策略
+
+当用户要搜索「能买到」的内容时，不要搜通用词（如"母亲节蛋糕"），必须加地理位置限定词：
+- 纽约本地：`纽约 蛋糕 母亲节`、`法拉盛 蛋糕`、`长岛 蛋糕 推荐`
+- 多个关键词并行搜，覆盖不同区域（Flushing、Brooklyn、Manhattan、Long Island）
+- 注意甄别结果是否真正位于目标区域（如温哥华的店不算纽约本地）
+
+## 搜索超时绕行方案（重要）
+
+CLI `search-feeds` 在 rednote.com 上频繁超时（Bridge 错误: 页面加载超时）。
+根本原因是扩展的 `waitForTabComplete` 对搜索页的加载完成检测不可靠。
+
+### 绕行方法：JS 跳转
+
+不用 `page.navigate(search_url)`，改为：
+1. 先导航到 explore 首页（`page.navigate('https://www.rednote.com/explore')` — 加载快且可靠）
+2. 用 JS 跳转：`page.evaluate("window.location.href = '" + search_url + "'")`
+3. 等待 8 秒后提取 `__INITIAL_STATE__.search.feeds._rawValue`
+
+参考脚本：`scripts/batch_search_jsnav.py`（批量搜索模板）
+
+### 注意事项
+- 必须设置 `XHS_BASE_DOMAIN=rednote.com`（用户 cookies 在 rednote 上）
+- `uv run python3` 才能加载项目依赖（websockets 等）
+- 批量搜索建议每轮 3-5 个关键词，间隔 12 秒
+
 ## 失败处理
 
 - **未登录**：提示用户执行登录流程（xhs-auth）。
 - **Chrome 未启动**：使用 `chrome_launcher.py` 启动浏览器。
-- **操作超时**：检查网络连接，适当增加等待时间。
+- **操作超时**：先试 JS 跳转绕行方案（见上方）。若仍超时，检查网络连接。
 - **频率限制**：降低操作频率，增大间隔。
+- **__INITIAL_STATE__ 超时**：rednote.com 的正常行为，会自动触发 DOM 回退。
+- **详情页无数据**：rednote.com 的 `get-feed-detail` 尚未适配 DOM 回退，需先查看 `feed_detail.py` 添加类似 fallback。
