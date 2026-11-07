@@ -6,6 +6,9 @@
 
 > **⚠️ 使用建议**：虽然本项目使用真实的用户浏览器和账号环境，但仍建议**控制使用频率**，避免短时间内大量操作。频繁的自动化行为可能触发小红书的风控机制，导致账号受限。
 
+> 📰 作者也在运营一个 AI 资讯网站 [![LLM大模型邮报 - 中文 AI 资讯快报：大模型动态、工程实践与行业观察](https://img.shields.io/badge/官网-llmposts.com-2563eb?style=flat-square&logo=googlenews&logoColor=white)](https://llmposts.com?utm_source=github&utm_medium=readme&utm_campaign=xiaohongshu-skills&utm_content=readme_intro "LLM大模型邮报 - 中文 AI 资讯快报：大模型动态、工程实践与行业观察") — 欢迎关注。
+
+
 ## 功能概览
 
 | 技能 | 说明 | 核心能力 |

@@ -141,6 +141,28 @@ python scripts/cli.py get-feed-detail \
 
 输出包含：笔记完整内容、图片列表、互动数据、评论列表。
 
+### 批量获取详情的防风控策略
+
+**重要**：小红书会在同一 session 连续访问 4~5 篇详情后触发扫码验证（风控机制）。
+批量获取时必须每 3 篇插入一次随机等待，模拟人类阅读节奏。
+
+```bash
+# 正确做法：每 3 篇后 sleep 10~20 秒
+python scripts/cli.py get-feed-detail --feed-id ID1 --xsec-token TOKEN1 && \
+python scripts/cli.py get-feed-detail --feed-id ID2 --xsec-token TOKEN2 && \
+python scripts/cli.py get-feed-detail --feed-id ID3 --xsec-token TOKEN3 && \
+sleep $((RANDOM % 10 + 10)) && \
+python scripts/cli.py get-feed-detail --feed-id ID4 --xsec-token TOKEN4 && \
+python scripts/cli.py get-feed-detail --feed-id ID5 --xsec-token TOKEN5 && \
+python scripts/cli.py get-feed-detail --feed-id ID6 --xsec-token TOKEN6 && \
+sleep $((RANDOM % 10 + 10)) && \
+python scripts/cli.py get-feed-detail --feed-id ID7 --xsec-token TOKEN7
+```
+
+- 每组不超过 3 篇
+- 组间等待 10~20 秒（用 `$((RANDOM % 10 + 10))` 随机化）
+- 不要把所有命令无间隔地串在一起
+
 ### 获取用户主页
 
 ```bash
@@ -166,3 +188,12 @@ python scripts/cli.py user-profile \
 - **搜索无结果**：建议更换关键词或调整筛选条件。
 - **笔记不可访问**：可能是私密笔记或已删除，提示用户。
 - **用户主页不可访问**：用户可能已注销或设置隐私。
+
+## 风控数据 (NetLog)
+
+如需了解当前会话被 XHS 检测的维度，可调用：
+
+- `python scripts/cli.py get-netlog [--limit N]` —— 获取原始 entries
+- `python scripts/cli.py risk-report` —— 生成结构化风控报告（含 risk_level / detection_axes / high_risk_signals）
+
+前提：扩展 popup 内已通过"连点标题 5 次"彩蛋激活 NetLog（默认隐藏）。

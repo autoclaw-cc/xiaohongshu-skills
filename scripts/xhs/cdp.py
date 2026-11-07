@@ -215,10 +215,17 @@ class Page:
         box = self.evaluate(
             f"""
             (() => {{
-                const el = document.querySelector({json.dumps(selector)});
-                if (!el) return null;
-                el.scrollIntoView({{block: 'center'}});
-                const rect = el.getBoundingClientRect();
+                const nodes = Array.from(document.querySelectorAll({json.dumps(selector)}));
+                if (!nodes.length) return null;
+                const visible = nodes.find((el) => {{
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width <= 0 || rect.height <= 0) return false;
+                    const style = window.getComputedStyle(el);
+                    return style.display !== 'none' && style.visibility !== 'hidden';
+                }}) || nodes[0];
+                const target = visible.closest("button,[role='button'],a,[tabindex]") || visible;
+                target.scrollIntoView({{block: 'center'}});
+                const rect = target.getBoundingClientRect();
                 return {{x: rect.left + rect.width / 2, y: rect.top + rect.height / 2}};
             }})()
             """
@@ -363,6 +370,61 @@ class Page:
             }})()
             """
         )
+
+    def simulate_reading_mouse(self, duration_ms: int = 3000) -> None:
+        """模拟阅读鼠标轨迹：逐行扫视 + 随机停顿，通过合成 mousemove 事件实现。
+
+        在页面执行 JS 生成轨迹，Python 侧控制帧间延迟使时序真实。
+        """
+        import math as _math
+
+        # 获取视口尺寸
+        vw = int(self.evaluate("window.innerWidth || 1280") or 1280)
+        vh = int(self.evaluate("window.innerHeight || 800") or 800)
+
+        left   = int(vw * 0.25)
+        right  = int(vw * 0.75)
+        top    = int(vh * 0.20)
+        bottom = int(vh * 0.80)
+
+        def rand(a: int, b: int) -> int:
+            return random.randint(a, b)
+
+        def ease(t: float) -> float:
+            return 2 * t * t if t < 0.5 else -1 + (4 - 2 * t) * t
+
+        # 生成阅读路径：逐行扫视
+        waypoints: list[tuple[int, int, float]] = []  # (x, y, delay_sec)
+        cx, cy = rand(left, right), rand(top, top + (bottom - top) // 3)
+        line_count = max(3, duration_ms // 600)
+        line_step  = (bottom - top) // line_count
+
+        for _ in range(line_count):
+            row_end = rand(left + (right - left) // 2, right)
+            # 逐步插值从 cx→row_end
+            steps = max(3, rand(4, 8))
+            for s in range(1, steps + 1):
+                t = ease(s / steps)
+                wx = int(cx + (row_end - cx) * t) + rand(-3, 3)
+                wy = cy + rand(-2, 2)
+                waypoints.append((wx, wy, rand(14, 28) / 1000))
+            # 偶尔停顿（模拟阅读有趣的行）
+            if random.random() < 0.3:
+                waypoints.append((row_end, cy, rand(150, 500) / 1000))
+            # 换行
+            cy += line_step + rand(-6, 6)
+            if cy > bottom:
+                break
+            cx = rand(left, left + (right - left) // 3)
+            waypoints.append((cx, cy, rand(40, 80) / 1000))
+
+        # 逐帧分发
+        for x, y, delay in waypoints:
+            self.evaluate(
+                f"document.dispatchEvent(new MouseEvent('mousemove',"
+                f"{{clientX:{x},clientY:{y},bubbles:true,cancelable:true}}));"
+            )
+            time.sleep(delay)
 
     def get_scroll_top(self) -> int:
         """获取当前滚动位置。"""
@@ -527,7 +589,9 @@ class Page:
         try:
             doc = self._send_session("DOM.getDocument", {"depth": 0})
             root_id = doc["root"]["nodeId"]
-            query = self._send_session("DOM.querySelector", {"nodeId": root_id, "selector": selector})
+            query = self._send_session(
+                "DOM.querySelector", {"nodeId": root_id, "selector": selector}
+            )
             node_id = query.get("nodeId", 0)
             if not node_id:
                 return b""

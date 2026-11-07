@@ -9,7 +9,13 @@ import re
 import time
 
 from .cdp import Page
-from .errors import ContentTooLongError, PublishError, TitleTooLongError, UploadTimeoutError
+from .errors import (
+    AccountRiskControlError,
+    ContentTooLongError,
+    PublishError,
+    TitleTooLongError,
+    UploadTimeoutError,
+)
 from .selectors import (
     CONTENT_EDITOR,
     CONTENT_LENGTH_ERROR,
@@ -108,35 +114,192 @@ def fill_publish_form(page: Page, content: PublishImageContent) -> None:
 
 
 def click_publish_button(page: Page) -> None:
-    """点击发布按钮。
+    """触发发布。
 
-    用文本内容精确匹配，避免点到旁边的"发布笔记"下拉按钮。
+    XHS 把发布/暂存按钮包成 <xhs-publish-btn> Vue web component + closed shadow DOM。
+    host 上挂着 'publish' 自定义事件 ——直接 dispatchEvent 比坐标点击 + CDP 真鼠标
+    更可靠：不依赖坐标、不依赖 chrome.debugger、不会被反爬的鼠标事件指纹检测。
+
+    流程：
+      1. 注入 3 层响应捕获（XHR/fetch 内容匹配 + console hook + DOM toast 观察器）
+      2. host.dispatchEvent(new CustomEvent('publish')) 触发发布
+      3. 轮询任一层捕获到的结果，识别业务错误码（-9136 = 账号风控）
 
     Raises:
-        PublishError: 点击失败。
+        PublishError: 未找到 host 或按钮被禁用。
+        AccountRiskControlError: 账号被风控（如 code=-9136）。
     """
-    clicked = page.evaluate(
+    # 1) 注入多层响应捕获
+    #    XHS 自家有多层 XHR 拦截嵌套（s1-main / interceptor.js / axios），URL pattern
+    #    无法可靠匹配；用"响应内容标志"判定 + console.error hook + DOM toast 观察器三管齐下。
+    page.evaluate(
         """
         (() => {
-            // 找文本内容精确为"发布"的 bg-red 按钮（排除"发布笔记"等）
-            const btns = document.querySelectorAll('button.bg-red');
-            for (const btn of btns) {
-                const span = btn.querySelector('span');
-                const text = (span ? span.textContent : btn.textContent).trim();
-                if (text === '发布') {
-                    btn.scrollIntoView({block: 'center'});
-                    btn.click();
-                    return true;
+            window.__xhsPublishResult = null;
+
+            // 内容标志：成功响应含 note_id；失败响应含 HTTPBizError 或 -913x 风控码或"禁止发笔记"
+            function looksLikePublishResp(body) {
+                if (!body) return false;
+                return body.includes('HTTPBizError')
+                    || /"code":\\s*-913\\d/.test(body)
+                    || body.includes('禁止发笔记')
+                    || /"note_id":\\s*"[^"]+"/.test(body);
+            }
+
+            function capture(source, info) {
+                if (window.__xhsPublishResult) return;  // first-wins
+                window.__xhsPublishResult = {source, ...info};
+            }
+
+            function captureFromBody(source, url, status, body) {
+                if (window.__xhsPublishResult) return;
+                if (!looksLikePublishResp(body)) return;
+                try {
+                    const j = JSON.parse(body);
+                    capture(source, {url, status, ...j});
+                } catch (e) {
+                    // body 不是顶层 JSON，尝试 regex 抽取 code/msg
+                    const codeMatch = body.match(/"code":\\s*(-?\\d+)/);
+                    const msgMatch = body.match(/"msg":\\s*"([^"]+)"/);
+                    capture(source, {
+                        url, status,
+                        code: codeMatch ? parseInt(codeMatch[1], 10) : null,
+                        msg: msgMatch ? msgMatch[1] : null,
+                        raw: body.slice(0, 500),
+                    });
                 }
             }
-            return false;
+
+            // Layer 1: XHR — 内容标志判定，绕开 URL pattern 不可靠的问题
+            const origOpen = XMLHttpRequest.prototype.open;
+            const origSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this.__xhsPubUrl = url;
+                return origOpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function() {
+                this.addEventListener('loadend', () => {
+                    captureFromBody('xhr', this.__xhsPubUrl, this.status, this.responseText || '');
+                });
+                return origSend.apply(this, arguments);
+            };
+
+            // Layer 2: fetch — 同样内容判定
+            const origFetch = window.fetch;
+            window.fetch = async function(...args) {
+                const url = typeof args[0] === 'string' ? args[0] : args[0].url;
+                const resp = await origFetch.apply(this, args);
+                try {
+                    const txt = await resp.clone().text();
+                    captureFromBody('fetch', url, resp.status, txt);
+                } catch (e) {}
+                return resp;
+            };
+
+            // Layer 3: console hook — XHS publish module 失败时打印 "[发布失败] HTTPBizError: ..."
+            ['error', 'log', 'warn'].forEach((method) => {
+                const orig = console[method];
+                console[method] = function(...args) {
+                    const txt = args.map((a) => {
+                        if (typeof a === 'string') return a;
+                        if (a && typeof a === 'object') {
+                            try { return JSON.stringify(a); } catch (e) { return String(a); }
+                        }
+                        return String(a);
+                    }).join(' ');
+                    if (txt.includes('HTTPBizError') || txt.includes('发布失败')) {
+                        const codeMatch = txt.match(/"code":\\s*(-?\\d+)/);
+                        const msgMatch = txt.match(/"msg":\\s*"([^"]+)"/);
+                        if (codeMatch) {
+                            capture('console', {
+                                code: parseInt(codeMatch[1], 10),
+                                msg: msgMatch ? msgMatch[1] : '发布失败',
+                                raw_console: txt.slice(0, 800),
+                            });
+                        }
+                    }
+                    return orig.apply(this, args);
+                };
+            });
+
+            // Layer 4: DOM MutationObserver — toast 出现"违反/违规/禁止发笔记"等关键词
+            const RISK_KW = /违反|违规|禁止发笔记|审核未通过|账号异常|无法发布/;
+            const obs = new MutationObserver((muts) => {
+                if (window.__xhsPublishResult) return;
+                muts.forEach((m) => {
+                    m.addedNodes.forEach((n) => {
+                        if (n.nodeType !== 1) return;
+                        const txt = (n.textContent || '').trim();
+                        if (txt.length === 0 || txt.length > 300) return;
+                        if (!RISK_KW.test(txt)) return;
+                        capture('toast', {
+                            code: -9136,  // 默认风控码
+                            msg: txt,
+                            cls: (n.className || '').toString().slice(0, 80),
+                        });
+                    });
+                });
+            });
+            obs.observe(document.body, {childList: true, subtree: true});
+            window.__xhsPublishObs = obs;
         })()
         """
     )
-    if not clicked:
-        raise PublishError("未找到发布按钮")
-    time.sleep(3)
-    logger.info("发布完成")
+
+    # 2) dispatchEvent 触发发布
+    fire_result = page.evaluate(
+        """
+        (() => {
+            const host = document.querySelector('xhs-publish-btn[is-publish="true"]');
+            if (!host) return 'not_found';
+            if (host.getAttribute('submit-disabled') === 'true') return 'disabled';
+            host.dispatchEvent(new CustomEvent('publish', {bubbles: true, cancelable: true}));
+            return 'fired';
+        })()
+        """
+    )
+    if fire_result == "not_found":
+        raise PublishError("未找到 <xhs-publish-btn> 发布按钮容器")
+    if fire_result == "disabled":
+        raise PublishError("发布按钮 submit-disabled=true，不可发布")
+
+    # 3) 轮询等待 publish API 响应（15s 超时）
+    deadline = time.monotonic() + 15
+    result = None
+    while time.monotonic() < deadline:
+        result = page.evaluate("window.__xhsPublishResult")
+        if result:
+            break
+        time.sleep(0.3)
+
+    if not result:
+        logger.warning("15s 内未捕获到任何发布反馈（XHR/console/toast 都没匹配）")
+        time.sleep(2)
+        return
+
+    # 4) 解析业务码
+    source = result.get("source", "unknown")
+    code = result.get("code")
+    msg = result.get("msg", "")
+    success = result.get("success")
+    logger.info("捕获发布响应（来源=%s code=%s msg=%r）", source, code, msg)
+
+    if code == 0 or success is True:
+        logger.info("发布成功")
+        time.sleep(2)
+        return
+
+    # XHS 风控类业务码（-913x 段）+ 关键词兜底
+    is_risk_control = (
+        (code is not None and -9140 <= code <= -9130)
+        or "违反" in (msg or "")
+        or "禁止发笔记" in (msg or "")
+        or "违规" in (msg or "")
+    )
+    if is_risk_control:
+        raise AccountRiskControlError(code or -9136, msg or "账号被风控")
+
+    raise PublishError(f"发布失败：code={code} msg={msg!r}")
 
 
 def save_as_draft(page: Page) -> None:
@@ -176,54 +339,85 @@ def _navigate_to_publish_page(page: Page) -> None:
 
 
 def _click_publish_tab(page: Page, tab_name: str) -> None:
-    """点击发布页 TAB（上传图文/上传视频）。"""
+    """点击发布页 TAB（上传图文/上传视频/写长文/发播客）。
+
+    XHS 创作中心反爬升级版 —— 每个 tab 渲染 3 份：
+
+    1. "屏外诱饵"：Vue scoped (data-v-*)，藏在 `left:-9999px; top:-9999px`，
+       看起来像真 tab 但**不绑事件**，点了 active 不切换。**没有 hp 属性**所以
+       老代码会把它当真 tab 误点。
+    2. "明显 honey pot"：带 data-hp-kind + button-hp-installed，
+       inset 在视口内但 opacity:1e-05 + z-index:-1，点了被标机器人。
+    3. **真 tab**：Vue scoped + 在视口内 + 带 **data-hp-bound="1"**
+       （XHS 反爬框架"已绑定真实事件"的标记）。
+
+    正确策略：找 `data-hp-bound="1"` 且无 hp 陷阱属性的 Vue tab；用 active class
+    切换确认。
+
+    """
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        # 查找匹配的 TAB（支持多种结构）
         found = page.evaluate(
             f"""
             (() => {{
-                // 策略1: 查找 div.creator-tab（过滤隐藏元素）
-                let tabs = document.querySelectorAll({json.dumps(CREATOR_TAB)});
-                for (const tab of tabs) {{
-                    const titleSpan = tab.querySelector('span.title');
-                    const tabText = titleSpan ? titleSpan.textContent.trim() : tab.textContent.trim();
-                    if (tabText === {json.dumps(tab_name)}) {{
-                        const rect = tab.getBoundingClientRect();
-                        const style = window.getComputedStyle(tab);
-                        // 跳过隐藏或被移出视口的元素
-                        if (rect.width === 0 || rect.height === 0) continue;
-                        if (rect.left < 0 || rect.top < 0) continue;
-                        if (style.display === 'none' || style.visibility === 'hidden') continue;
-                        const x = rect.left + rect.width / 2;
-                        const y = rect.top + rect.height / 2;
-                        const target = document.elementFromPoint(x, y);
-                        if (target === tab || tab.contains(target)) {{
-                            tab.click();
-                            return 'clicked';
-                        }}
-                        return 'blocked';
-                    }}
+                const name = {json.dumps(tab_name)};
+                const tabs = document.querySelectorAll({json.dumps(CREATOR_TAB)});
+
+                // 真 tab：有 data-hp-bound + 无 hp 陷阱属性 + 在视口里
+                for (const t of tabs) {{
+                    if (t.hasAttribute('data-hp-kind') || t.hasAttribute('button-hp-installed')) continue;
+                    if (!t.hasAttribute('data-hp-bound')) continue;
+                    const title = t.querySelector('span.title');
+                    if (!title || title.textContent.trim() !== name) continue;
+                    const r = t.getBoundingClientRect();
+                    if (r.left < -1000 || r.top < -1000) continue;
+                    t.click();
+                    return 'clicked';
                 }}
-                
-                // 策略2: 查找任意包含目标文本的元素
-                const allElements = document.querySelectorAll('*');
-                for (const el of allElements) {{
-                    if (el.children.length === 0 && el.textContent.trim() === {json.dumps(tab_name)}) {{
-                        const rect = el.getBoundingClientRect();
-                        const style = window.getComputedStyle(el);
-                        if (rect.width === 0 || rect.height === 0) continue;
-                        if (rect.left < 0 || rect.top < 0) continue;
-                        if (style.display === 'none' || style.visibility === 'hidden') continue;
-                        el.click();
-                        return 'clicked';
-                    }}
+
+                // 兜底 1：无 hp 陷阱属性 + 在视口内（兼容 XHS 未来去掉 data-hp-bound）
+                for (const t of tabs) {{
+                    if (t.hasAttribute('data-hp-kind') || t.hasAttribute('button-hp-installed')) continue;
+                    const title = t.querySelector('span.title');
+                    if (!title || title.textContent.trim() !== name) continue;
+                    const r = t.getBoundingClientRect();
+                    if (r.left < -1000 || r.top < -1000) continue;
+                    t.click();
+                    return 'clicked';
                 }}
-                
+
                 return 'not_found';
             }})()
             """
         )
+
+        # 等待 active class 切换：检查真正 active 的 tab title 是否 == 目标
+        if found == "clicked":
+            switched_deadline = time.monotonic() + 5
+            while time.monotonic() < switched_deadline:
+                active_title = page.evaluate(
+                    f"""
+                    (() => {{
+                        // 找视口内 + 无 hp 陷阱 + active 的 tab，取它的 title
+                        const tabs = document.querySelectorAll({json.dumps(CREATOR_TAB)});
+                        for (const t of tabs) {{
+                            if (t.hasAttribute('data-hp-kind') || t.hasAttribute('button-hp-installed')) continue;
+                            if (!t.classList.contains('active')) continue;
+                            const r = t.getBoundingClientRect();
+                            if (r.left < -1000 || r.top < -1000) continue;
+                            const title = t.querySelector('span.title');
+                            return title ? title.textContent.trim() : null;
+                        }}
+                        return null;
+                    }})()
+                    """
+                )
+                if active_title == tab_name:
+                    return
+                time.sleep(0.2)
+            logger.warning(
+                "点击了 %s 但 active tab 仍是 %r，可能被反爬拦截", tab_name, active_title
+            )
 
         if found == "clicked":
             return

@@ -42,6 +42,19 @@ class PublishError(XHSError):
     """发布失败。"""
 
 
+class AccountRiskControlError(PublishError):
+    """账号被风控，无法发布。
+
+    XHS 后端业务错误码（HTTP 200 + code≠0）：
+      - -9136: 因违反社区规范禁止发笔记
+    """
+
+    def __init__(self, code: int, msg: str) -> None:
+        self.code = code
+        self.msg = msg
+        super().__init__(f"账号被风控（code={code}）：{msg}")
+
+
 class TitleTooLongError(PublishError):
     """标题超过长度限制。"""
 

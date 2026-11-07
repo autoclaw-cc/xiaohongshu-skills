@@ -55,10 +55,13 @@ class BridgePage:
         self._call("wait_for_load", {"timeout": int(timeout * 1000)})
 
     def wait_dom_stable(self, timeout: float = 10.0, interval: float = 0.5) -> None:
-        self._call("wait_dom_stable", {
-            "timeout": int(timeout * 1000),
-            "interval": int(interval * 1000),
-        })
+        self._call(
+            "wait_dom_stable",
+            {
+                "timeout": int(timeout * 1000),
+                "interval": int(interval * 1000),
+            },
+        )
 
     # ─── JavaScript 执行 ────────────────────────────────────────
 
@@ -83,10 +86,13 @@ class BridgePage:
         return bool(self._call("has_element", {"selector": selector}))
 
     def wait_for_element(self, selector: str, timeout: float = 30.0) -> str:
-        found = self._call("wait_for_selector", {
-            "selector": selector,
-            "timeout": int(timeout * 1000),
-        })
+        found = self._call(
+            "wait_for_selector",
+            {
+                "selector": selector,
+                "timeout": int(timeout * 1000),
+            },
+        )
         if not found:
             raise ElementNotFoundError(selector)
         return "found"
@@ -94,7 +100,49 @@ class BridgePage:
     # ─── 元素操作 ────────────────────────────────────────────────
 
     def click_element(self, selector: str) -> None:
-        self._call("click_element", {"selector": selector})
+        self.evaluate(
+            f"""
+            (() => {{
+                const nodes = Array.from(document.querySelectorAll({json.dumps(selector)}));
+                if (!nodes.length) throw new Error('元素不存在: ' + {json.dumps(selector)});
+                const visible = nodes.find((el) => {{
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width <= 0 || rect.height <= 0) return false;
+                    const style = window.getComputedStyle(el);
+                    return style.display !== 'none' && style.visibility !== 'hidden';
+                }}) || nodes[0];
+                const target = visible.closest("button,[role='button'],a,[tabindex]") || visible;
+                target.scrollIntoView({{block: 'center'}});
+                if (typeof target.focus === 'function') target.focus();
+
+                if (typeof target.click === 'function') {{
+                    target.click();
+                    return;
+                }}
+
+                const rect = target.getBoundingClientRect();
+                const x = rect.left + rect.width / 2;
+                const y = rect.top + rect.height / 2;
+                const pointEl = document.elementFromPoint(x, y);
+                const dispatchTarget =
+                    pointEl && (pointEl === target || target.contains(pointEl))
+                        ? pointEl
+                        : target;
+
+                ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((t) => {{
+                    dispatchTarget.dispatchEvent(new MouseEvent(t, {{
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: x,
+                        clientY: y,
+                    }}));
+                }});
+            }})()
+            """
+        )
+
+    def click_element_by_text(self, selector: str, text: str) -> None:
+        self._call("click_element_by_text", {"selector": selector, "text": text})
 
     def input_text(self, selector: str, text: str) -> None:
         self._call("input_text", {"selector": selector, "text": text})
@@ -180,6 +228,38 @@ class BridgePage:
         if result and result.get("data"):
             return base64.b64decode(result["data"])
         return b""
+
+    # ─── 风控分析 ────────────────────────────────────────────────
+
+    def get_404_diagnostics(self) -> list[dict]:
+        """获取拦截器捕获的 404/461/403/999 诊断事件列表（最近 50 条）。
+        每条事件包含请求上下文、cookie 快照、以及根因分析。
+        """
+        return self._call("get_404_diagnostics") or []
+
+    def clear_404_diagnostics(self) -> None:
+        """清空已存储的诊断事件。"""
+        self._call("clear_404_diagnostics")
+
+    def analyze_risk_control(self, probe_urls: list[str] | None = None) -> dict:
+        """分析小红书风控状态。
+        检查自动化指纹（webdriver、plugins、WebGL 等）、页面风控元素、
+        并实时探测关键 API 端点的响应状态。
+        返回结构化报告，含 risk_level（safe/low/medium/high）和 issues 列表。
+        """
+        return self._call("analyze_risk_control", {"probeUrls": probe_urls or []})
+
+    # ─── NetLog 风控数据 ─────────────────────────────────────────
+
+    def get_netlog_enabled(self) -> bool:
+        """检查 NetLog 是否已启用（用户在扩展 popup 上彩蛋激活）。"""
+        result = self._call("get_netlog_enabled") or {}
+        return bool(result.get("enabled"))
+
+    def get_netlog(self) -> list[dict]:
+        """获取当前会话的全部 NetLog entries（最多 500 条环形缓冲）。"""
+        result = self._call("get_netlog") or {}
+        return result.get("entries") or []
 
     # ─── 无操作（原 CDP 专有功能，扩展模式不需要） ─────────────────
 

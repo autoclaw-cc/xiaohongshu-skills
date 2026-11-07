@@ -258,6 +258,8 @@ class FeedDetail:
     xsec_token: str = ""
     title: str = ""
     desc: str = ""
+    body: str = ""   # DOM 正文（干净文本，不含 [话题] 标记）
+    tags: list[str] = field(default_factory=list)  # 话题标签列表
     type: str = ""
     time: int = 0
     ip_location: str = ""
@@ -272,6 +274,8 @@ class FeedDetail:
             xsec_token=d.get("xsecToken", ""),
             title=d.get("title", ""),
             desc=d.get("desc", ""),
+            body=d.get("_domBody", ""),
+            tags=d.get("_domTags", []),
             type=d.get("type", ""),
             time=d.get("time", 0),
             ip_location=d.get("ipLocation", ""),
@@ -285,6 +289,8 @@ class FeedDetail:
             "noteId": self.note_id,
             "title": self.title,
             "desc": self.desc,
+            "body": self.body,
+            "tags": self.tags,
             "type": self.type,
             "time": self.time,
             "ipLocation": self.ip_location,

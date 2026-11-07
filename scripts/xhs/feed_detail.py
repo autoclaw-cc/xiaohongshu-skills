@@ -7,6 +7,7 @@ import logging
 import random
 import re
 import time
+import urllib.parse
 
 from .cdp import Page
 from .errors import NoFeedDetailError, PageNotAccessibleError
@@ -19,7 +20,6 @@ from .human import (
     MAX_CLICK_PER_ROUND,
     MIN_SCROLL_DELTA,
     POST_SCROLL,
-    REACTION_TIME,
     READ_TIME,
     SCROLL_WAIT,
     SHORT_READ,
@@ -79,6 +79,7 @@ def get_feed_detail(
     xsec_token: str,
     load_all_comments: bool = False,
     config: CommentLoadConfig | None = None,
+    keyword: str = "篮球",
 ) -> FeedDetailResponse:
     """获取 Feed 详情（含评论）。
 
@@ -107,6 +108,8 @@ def get_feed_detail(
     )
 
     # 导航（含重试）
+    # 注：风控 302→/404 由扩展 auto-fix（自动从搜索页换新 token 重试），
+    # 此处只捕获真正的瞬态错误（网络超时等），风控拦截不重试。
     for attempt in range(3):
         try:
             page.navigate(url)
@@ -114,6 +117,10 @@ def get_feed_detail(
             page.wait_dom_stable()
             break
         except Exception as e:
+            err_str = str(e)
+            # 风控 302 重定向：扩展已尝试 auto-fix，仍失败说明 token/session 问题，直接抛出
+            if "风控拦截" in err_str or "重定向至" in err_str:
+                raise PageNotAccessibleError(f"笔记无法访问（风控/token）: {err_str}") from e
             logger.debug("页面导航重试 #%d: %s", attempt, e)
             time.sleep(0.5 + random.random())
     else:
@@ -121,8 +128,14 @@ def get_feed_detail(
 
     sleep_random(800, 1500)
 
+    # 模拟阅读鼠标轨迹（同步进行，增加行为真实性）
+    try:
+        page.simulate_reading_mouse(random.randint(2000, 4000))
+    except Exception:
+        pass
+
     # 检查页面可访问性（扫码验证时自动等待重试）
-    _check_page_accessible(page, url)
+    _check_page_accessible(page, url, keyword)
 
     # 加载全部评论
     if load_all_comments:
@@ -137,10 +150,13 @@ def get_feed_detail(
 # ========== 页面检查 ==========
 
 
-def _check_page_accessible(page: Page, url: str = "") -> None:
+def _check_page_accessible(page: Page, url: str = "", keyword: str = "篮球") -> None:
     """检查页面是否可访问。
 
-    扫码验证场景：等待 10 秒后自动重新访问，验证消失则继续，否则报错。
+    风控绕过策略（三级重试）：
+      1. 先回首页，再跳目标页（same-origin 导航）
+      2. 若仍触发：在搜索结果页加载后再跳目标页（模拟真实搜索→点击笔记流程）
+      3. 仍失败则抛出异常，提示用户手动扫码
     """
     time.sleep(0.5)
 
@@ -150,26 +166,54 @@ def _check_page_accessible(page: Page, url: str = "") -> None:
 
     text = text.strip()
 
-    # 检测扫码验证（反爬机制触发）→ 等待后重试
     if _is_scan_qrcode_verification(text) and url:
-        logger.warning("触发小红书扫码验证，等待 10 秒后重新访问...")
+        # ── Level 1：首页跳转 ──
+        logger.warning("触发小红书扫码验证，Level-1 重试：先回首页再访问目标...")
         time.sleep(10)
+        page.navigate("https://www.xiaohongshu.com")
+        page.wait_for_load()
+        page.wait_dom_stable()
+        time.sleep(2 + random.random())
         page.navigate(url)
         page.wait_for_load()
         page.wait_dom_stable()
         time.sleep(1)
 
         retry_text = page.get_element_text(ACCESS_ERROR_WRAPPER)
-        if retry_text and _is_scan_qrcode_verification(retry_text.strip()):
-            raise PageNotAccessibleError(
-                "触发了小红书验证，需要在浏览器中扫码完成验证后重试。"
-                "这通常是小红书的反爬机制，请稍后再试或在 Chrome 中手动打开该笔记完成验证"
-            )
         if not retry_text or not retry_text.strip():
-            logger.info("验证已消失，继续加载笔记")
+            logger.info("Level-1 重试成功，继续加载笔记")
             return
-        # 重试后仍有其他错误，继续走下面的关键词检测
-        text = retry_text.strip()
+        if not _is_scan_qrcode_verification(retry_text.strip()):
+            text = retry_text.strip()
+        else:
+            # ── Level 2：搜索跳转 ──
+            search_url = (
+                "https://www.xiaohongshu.com/search_result?"
+                + urllib.parse.urlencode({"keyword": keyword, "type": "51"})
+            )
+            logger.warning(
+                "Level-1 失败，Level-2 重试：搜索「%s」后再访问目标...", keyword
+            )
+            time.sleep(5 + random.random() * 5)
+            page.navigate(search_url)
+            page.wait_for_load()
+            page.wait_dom_stable()
+            time.sleep(3 + random.random() * 2)
+            page.navigate(url)
+            page.wait_for_load()
+            page.wait_dom_stable()
+            time.sleep(1)
+
+            retry_text = page.get_element_text(ACCESS_ERROR_WRAPPER)
+            if not retry_text or not retry_text.strip():
+                logger.info("Level-2 重试成功，继续加载笔记")
+                return
+            if _is_scan_qrcode_verification(retry_text.strip()):
+                raise PageNotAccessibleError(
+                    "触发了小红书验证，需要在浏览器中扫码完成验证后重试。"
+                    "这通常是小红书的反爬机制，请稍后再试或在 Chrome 中手动打开该笔记完成验证"
+                )
+            text = retry_text.strip()
 
     for kw in _INACCESSIBLE_KEYWORDS:
         if kw in text:
@@ -187,7 +231,7 @@ def _is_scan_qrcode_verification(text: str) -> bool:
 # ========== 数据提取 ==========
 
 
-_EXTRACT_DETAIL_JS = """
+_EXTRACT_STATE_JS = """
 (() => {
     if (window.__INITIAL_STATE__ &&
         window.__INITIAL_STATE__.note &&
@@ -198,15 +242,40 @@ _EXTRACT_DETAIL_JS = """
 })()
 """
 
+_EXTRACT_DOM_BODY_JS = """
+(() => {
+    const bodyEl = document.querySelector('#detail-desc');
+    if (!bodyEl) return null;
+    // 先提取话题标签
+    const tags = Array.from(bodyEl.querySelectorAll('a.tag'))
+                      .map(a => a.textContent.trim())
+                      .filter(Boolean);
+    // 克隆后移除 a.tag，再取 textContent（不依赖 CSS layout，后台标签页同样生效）
+    const clone = bodyEl.cloneNode(true);
+    clone.querySelectorAll('a.tag').forEach(el => el.remove());
+    const bodyText = clone.textContent.replace(/\\n{3,}/g, '\\n\\n').trim();
+    if (!bodyText && !tags.length) return null;
+    return {body: bodyText, tags: tags};
+})()
+"""
+
 
 def _extract_feed_detail(page: Page, feed_id: str) -> FeedDetailResponse:
-    """从 __INITIAL_STATE__ 提取 Feed 详情。"""
+    """从 __INITIAL_STATE__ 提取 Feed 详情，轮询最多 10s。
+
+    两阶段提取：
+    1. 等待 __INITIAL_STATE__ 数据就绪（最多 10s）
+    2. 等待 #detail-desc DOM 渲染完成后提取正文（最多 8s）
+       Vue 渲染时序：state 早于 DOM，需分开轮询。
+    """
+    # 阶段 1：等待 __INITIAL_STATE__
+    deadline = time.monotonic() + 10.0
     result = None
-    for _ in range(3):
-        result = page.evaluate(_EXTRACT_DETAIL_JS)
+    while time.monotonic() < deadline:
+        result = page.evaluate(_EXTRACT_STATE_JS)
         if result:
             break
-        time.sleep(0.2)
+        time.sleep(0.3)
 
     if not result:
         raise NoFeedDetailError()
@@ -216,8 +285,22 @@ def _extract_feed_detail(page: Page, feed_id: str) -> FeedDetailResponse:
     if not note_data:
         raise NoFeedDetailError()
 
+    # 阶段 2：等待 #detail-desc 渲染（Vue 异步渲染，state 就绪后 DOM 可能还未填充）
+    dom_deadline = time.monotonic() + 8.0
+    dom_result = None
+    while time.monotonic() < dom_deadline:
+        dom_result = page.evaluate(_EXTRACT_DOM_BODY_JS)
+        if dom_result and isinstance(dom_result, dict) and dom_result.get("body", "").strip():
+            break
+        time.sleep(0.3)
+
+    note = note_data.get("note", {})
+    if dom_result and isinstance(dom_result, dict):
+        note["_domBody"] = dom_result.get("body", "")
+        note["_domTags"] = dom_result.get("tags", [])
+
     return FeedDetailResponse(
-        note=FeedDetail.from_dict(note_data.get("note", {})),
+        note=FeedDetail.from_dict(note),
         comments=CommentList.from_dict(note_data.get("comments", {})),
     )
 
@@ -251,12 +334,13 @@ def _load_all_comments(page: Page, config: CommentLoadConfig) -> None:
     for attempt in range(max_attempts):
         logger.debug("=== 尝试 %d/%d ===", attempt + 1, max_attempts)
 
-        # 检查是否到达底部
-        if _check_end_container(page):
-            count = _get_comment_count(page)
+        # 一次调用同时获取：评论数 + 是否到底
+        state = _check_page_state(page)
+
+        if state["at_end"]:
             logger.info(
                 "检测到 THE END，加载完成: %d 条评论, 点击: %d, 跳过: %d",
-                count,
+                state["count"],
                 total_clicked,
                 total_skipped,
             )
@@ -276,8 +360,7 @@ def _load_all_comments(page: Page, config: CommentLoadConfig) -> None:
                 if c2 > 0 or s2 > 0:
                     sleep_random(*SHORT_READ)
 
-        # 获取当前评论数
-        current_count = _get_comment_count(page)
+        current_count = state["count"]
         if current_count != last_count:
             logger.info("评论增加: %d -> %d", last_count, current_count)
             last_count = current_count
@@ -339,8 +422,13 @@ def _human_scroll(
     Returns:
         (actual_delta, current_scroll_top)
     """
-    before_top = page.get_scroll_top()
-    viewport_height = page.get_viewport_height()
+    # 一次 evaluate 同时获取 scrollTop 和 viewportHeight，减少 bridge 往返
+    state = page.evaluate(
+        "({scrollTop: window.pageYOffset || document.documentElement.scrollTop || 0,"
+        " viewportHeight: window.innerHeight})"
+    )
+    before_top = int(state.get("scrollTop", 0)) if isinstance(state, dict) else page.get_scroll_top()
+    viewport_height = int(state.get("viewportHeight", 768)) if isinstance(state, dict) else page.get_viewport_height()
 
     base_ratio = get_scroll_ratio(speed)
     if large_mode:
@@ -382,10 +470,12 @@ def _scroll_to_comments_area(page: Page) -> None:
 
 
 def _scroll_to_last_comment(page: Page) -> None:
-    """滚动到最后一条评论。"""
-    count = page.get_elements_count(PARENT_COMMENT)
-    if count > 0:
-        page.scroll_nth_element_into_view(PARENT_COMMENT, count - 1)
+    """滚动到最后一条评论（count + scroll 合并为 1 次 evaluate）。"""
+    sel = json.dumps(PARENT_COMMENT)
+    page.evaluate(
+        f"(function(){{const els=document.querySelectorAll({sel});"
+        f"if(els.length>0)els[els.length-1].scrollIntoView({{block:'center',behavior:'smooth'}})}})()"
+    )
 
 
 # ========== DOM 查询 ==========
@@ -424,31 +514,59 @@ def _check_end_container(page: Page) -> bool:
     return "THE END" in upper or "THEEND" in upper
 
 
+def _check_page_state(page: Page) -> dict:
+    """一次 evaluate 同时获取评论数、是否无评论、是否到达底部。
+
+    Returns:
+        {"count": int, "no_comments": bool, "at_end": bool}
+    """
+    sel_parent = json.dumps(PARENT_COMMENT)
+    sel_no = json.dumps(NO_COMMENTS_TEXT)
+    sel_end = json.dumps(END_CONTAINER)
+    result = page.evaluate(
+        f"(function(){{"
+        f"  var count = document.querySelectorAll({sel_parent}).length;"
+        f"  var noText = (document.querySelector({sel_no}) || {{}}).textContent || '';"
+        f"  var endText = ((document.querySelector({sel_end}) || {{}}).textContent || '').toUpperCase();"
+        f"  return {{count: count,"
+        f"    no_comments: noText.indexOf('这是一片荒地') >= 0,"
+        f"    at_end: endText.indexOf('THE END') >= 0 || endText.indexOf('THEEND') >= 0}};"
+        f"}})()"
+    )
+    if isinstance(result, dict):
+        return result
+    return {"count": 0, "no_comments": False, "at_end": False}
+
+
 # ========== 按钮点击 ==========
 
 
 def _click_show_more_buttons(page: Page, max_threshold: int) -> tuple[int, int]:
     """点击"展开N条回复"按钮。
 
+    优化：1 次 evaluate 批量获取所有按钮文本，每次点击用 1 次 evaluate 完成
+    scroll+click，减少 bridge 往返次数。
+
     Returns:
         (clicked, skipped)
     """
-    count = page.get_elements_count(SHOW_MORE_BUTTON)
-    if count == 0:
+    sel = json.dumps(SHOW_MORE_BUTTON)
+
+    # 一次 evaluate 获取所有按钮文本
+    texts = page.evaluate(
+        f"Array.from(document.querySelectorAll({sel})).map(e => e.textContent || '')"
+    )
+    if not texts or not isinstance(texts, list):
         return 0, 0
 
     max_click = MAX_CLICK_PER_ROUND + random.randint(0, MAX_CLICK_PER_ROUND - 1)
     clicked = 0
     skipped = 0
 
-    for i in range(count):
+    for i, text in enumerate(texts):
         if clicked >= max_click:
             break
 
-        # 获取按钮文本
-        text = page.evaluate(
-            f"document.querySelectorAll({json.dumps(SHOW_MORE_BUTTON)})[{i}]?.textContent || ''"
-        )
         if not text:
             continue
 
@@ -464,10 +582,13 @@ def _click_show_more_buttons(page: Page, max_threshold: int) -> tuple[int, int]:
                     skipped += 1
                     continue
 
-        # 滚动到按钮并点击
-        page.scroll_nth_element_into_view(SHOW_MORE_BUTTON, i)
-        sleep_random(*REACTION_TIME)
-        page.evaluate(f"document.querySelectorAll({json.dumps(SHOW_MORE_BUTTON)})[{i}]?.click()")
+        # 一次 evaluate 完成：滚动到按钮 + 点击
+        page.evaluate(
+            f"(function(){{"
+            f"  var el=document.querySelectorAll({sel})[{i}];"
+            f"  if(el){{el.scrollIntoView({{block:'center',behavior:'smooth'}});el.click();}}"
+            f"}})()"
+        )
         sleep_random(*READ_TIME)
         clicked += 1
 

@@ -15,43 +15,22 @@ from .urls import BASE_DOMAIN, make_search_url
 
 logger = logging.getLogger(__name__)
 
-
-def _titled_feed_count(result_json: str) -> int:
-    """How many extracted feeds carry a non-empty title — used to tell a usable
-    __INITIAL_STATE__ payload from rednote's title-less one."""
-    try:
-        data = json.loads(result_json)
-    except (TypeError, ValueError):
-        return 0
-    count = 0
-    for feed in data if isinstance(data, list) else []:
-        note = feed.get("noteCard") or feed.get("note_card") or {}
-        if (note.get("displayTitle") or note.get("display_title") or "").strip():
-            count += 1
-    return count
-
-# 筛选选项映射表：{筛选组索引: [(标签索引, 文本), ...]}
-_FILTER_OPTIONS: dict[int, list[tuple[int, str]]] = {
-    1: [(1, "综合"), (2, "最新"), (3, "最多点赞"), (4, "最多评论"), (5, "最多收藏")],
-    2: [(1, "不限"), (2, "视频"), (3, "图文")],
-    3: [(1, "不限"), (2, "一天内"), (3, "一周内"), (4, "半年内")],
-    4: [(1, "不限"), (2, "已看过"), (3, "未看过"), (4, "已关注")],
-    5: [(1, "不限"), (2, "同城"), (3, "附近")],
+# 筛选选项映射表：{筛选组索引: [文本, ...]}
+_FILTER_OPTIONS: dict[int, list[str]] = {
+    1: ["综合", "最新", "最多点赞", "最多评论", "最多收藏"],
+    2: ["不限", "视频", "图文"],
+    3: ["不限", "一天内", "一周内", "半年内"],
+    4: ["不限", "已看过", "未看过", "已关注"],
+    5: ["不限", "同城", "附近"],
 }
 
 # 从 __INITIAL_STATE__ 提取搜索结果的 JS
 _EXTRACT_SEARCH_JS = """
 (() => {
-    if (window.__INITIAL_STATE__ &&
-        window.__INITIAL_STATE__.search &&
-        window.__INITIAL_STATE__.search.feeds) {
-        const feeds = window.__INITIAL_STATE__.search.feeds;
-        const feedsData = feeds.value !== undefined ? feeds.value : feeds._value;
-        if (feedsData) {
-            return JSON.stringify(feedsData);
-        }
-    }
-    return "";
+    const s = window.__INITIAL_STATE__?.search;
+    if (!s?.feeds) return "";
+    const data = s.feeds.value !== undefined ? s.feeds.value : s.feeds._value;
+    return data ? JSON.stringify(data) : "";
 })()
 """
 
@@ -145,11 +124,11 @@ _EXTRACT_SEARCH_FROM_DOM_JS = """
 """
 
 
-def _find_internal_option(group_index: int, text: str) -> tuple[int, int]:
-    """查找内部筛选选项索引。
+def _find_internal_option(group_index: int, text: str) -> tuple[int, str]:
+    """查找内部筛选选项。
 
     Returns:
-        (filters_index, tags_index)
+        (filters_index, text)
 
     Raises:
         ValueError: 未找到匹配的选项。
@@ -158,17 +137,15 @@ def _find_internal_option(group_index: int, text: str) -> tuple[int, int]:
     if not options:
         raise ValueError(f"筛选组 {group_index} 不存在")
 
-    for tags_index, option_text in options:
-        if option_text == text:
-            return group_index, tags_index
+    if text in options:
+        return group_index, text
 
-    valid = [t for _, t in options]
-    raise ValueError(f"在筛选组 {group_index} 中未找到 '{text}'，有效值: {valid}")
+    raise ValueError(f"在筛选组 {group_index} 中未找到 '{text}'，有效值: {options}")
 
 
-def _convert_filters(filter_opt: FilterOption) -> list[tuple[int, int]]:
-    """将 FilterOption 转换为内部 (filters_index, tags_index) 列表。"""
-    result: list[tuple[int, int]] = []
+def _convert_filters(filter_opt: FilterOption) -> list[tuple[int, str]]:
+    """将 FilterOption 转换为内部 (filters_index, text) 列表。"""
+    result: list[tuple[int, str]] = []
 
     if filter_opt.sort_by:
         result.append(_find_internal_option(1, filter_opt.sort_by))
@@ -205,15 +182,10 @@ def search_feeds(
     page.wait_for_load()
     page.wait_dom_stable()
 
-    # Wait until __INITIAL_STATE__.search.feeds is HYDRATED (entries carry a
-    # title). On rednote.com the state object appears early with id-only feeds
-    # and fills in titles + xsec_token a beat later; extracting before then is
-    # what produced empty titles. Preferring the hydrated state also gives each
-    # feed its xsec_token, which get_feed_detail needs and the search DOM no
-    # longer exposes.
-    _wait_for_initial_state(page)
+    # 等待 __INITIAL_STATE__.search.feeds 有数据
+    _wait_for_search_feeds(page)
 
-    # 应用筛选条件
+    # 应用筛选条件（若有）
     if filter_option:
         internal_filters = _convert_filters(filter_option)
         if internal_filters:
@@ -234,103 +206,101 @@ def search_feeds(
         raise NoFeedsError()
 
     feeds_data = json.loads(result)
+    if not feeds_data:
+        raise NoFeedsError()
+
     return [Feed.from_dict(f) for f in feeds_data]
 
 
-def _wait_for_search_cards(page: Page, timeout: float = 20.0) -> None:
-    """Wait for rednote's client-rendered cards AND their titles to render.
+def _wait_for_search_feeds(page: Page, timeout: float = 15.0) -> None:
+    """等待 __INITIAL_STATE__.search.feeds 有数据。
 
-    The cards appear as skeletons first and their a.title text fills in a beat
-    later, so waiting only on card count extracts empty titles; wait until the
-    count of cards whose title is non-empty stops growing."""
+    Raises:
+        NoFeedsError: 超时仍无数据。
+    """
     deadline = time.monotonic() + timeout
     last_titled = -1
     while time.monotonic() < deadline:
-        try:
-            titled = int(
-                page.evaluate(
-                    "Array.from(document.querySelectorAll('section.note-item'))"
-                    ".filter(c => (c.querySelector('a.title') || {}).textContent"
-                    " && c.querySelector('a.title').textContent.trim()).length"
-                )
-            )
-        except Exception:
-            titled = 0
-        if titled > 0 and titled == last_titled:
-            return
-        last_titled = titled
-        time.sleep(1.0)
+        result = page.evaluate(_EXTRACT_SEARCH_JS)
+        if result:
+            try:
+                if json.loads(result):
+                    return
+            except json.JSONDecodeError:
+                pass
+        time.sleep(0.3)
+    raise NoFeedsError()
 
 
-_FEEDS_HYDRATED_JS = """
-(() => {
-    const s = window.__INITIAL_STATE__ && window.__INITIAL_STATE__.search;
-    if (!s || s.feeds === undefined) return -1;                 // no search state yet
-    const f = s.feeds;
-    const arr = (f && (f.value !== undefined ? f.value : f._value)) || [];
-    if (!arr.length) return 0;                                  // shell, no feeds
-    const titled = arr.filter(x => x && x.noteCard && (x.noteCard.displayTitle || '').trim()).length;
-    return titled;                                              // >0 once hydrated
-})()
+def _apply_filters(page: Page, filters: list[tuple[int, str]]) -> None:
+    """应用筛选条件。
+
+    在单次 evaluate 调用内完成：点击筛选按钮 → 等待面板 → 按文本点击各选项
+    → 等待搜索结果刷新。
+    避免多次 WebSocket 连接导致面板关闭的时序问题。
+    """
+    filter_js_list = ", ".join(
+        f'[{idx}, {json.dumps(text)}]' for idx, text in filters
+    )
+
+    # 记录当前 feeds 快照，用于检测结果是否已刷新
+    snapshot_js = "JSON.stringify(window.__INITIAL_STATE__?.search?.feeds?.value ?? window.__INITIAL_STATE__?.search?.feeds?._value ?? null)"
+
+    script = f"""
+(() => {{
+  return new Promise((resolve, reject) => {{
+    const btn = document.querySelector('div.filter');
+    if (!btn) {{ reject('筛选按钮不存在'); return; }}
+
+    // 记录点击前的 feeds 快照（用于判断结果已刷新）
+    const snapshot = {snapshot_js};
+    btn.click();
+
+    const items = [{filter_js_list}];
+    let attempts = 0;
+
+    // 等待筛选面板出现
+    const panelTimer = setInterval(() => {{
+      const wrapper = document.querySelector('div.filters-wrapper');
+      if (!wrapper) {{
+        if (++attempts > 50) {{ clearInterval(panelTimer); reject('筛选面板等待超时'); }}
+        return;
+      }}
+      clearInterval(panelTimer);
+
+      // 依次点击各筛选项
+      for (const [groupIdx, text] of items) {{
+        const group = wrapper.querySelectorAll('div.filters')[groupIdx - 1];
+        if (!group) {{ reject('筛选组 ' + groupIdx + ' 不存在'); return; }}
+        const tag = Array.from(group.querySelectorAll('div.tags'))
+          .find(el => el.textContent.trim() === text);
+        if (!tag) {{ reject('选项不存在: ' + text); return; }}
+        tag.click();
+      }}
+
+      // 等待搜索结果刷新（feeds 快照变化）
+      let refreshAttempts = 0;
+      const refreshTimer = setInterval(() => {{
+        const current = {snapshot_js};
+        if (current !== snapshot) {{
+          clearInterval(refreshTimer);
+          resolve(null);
+          return;
+        }}
+        if (++refreshAttempts > 60) {{
+          // 超时也继续（结果可能未变化）
+          clearInterval(refreshTimer);
+          resolve(null);
+        }}
+      }}, 100);
+    }}, 100);
+  }});
+}})()
 """
+    try:
+        page.evaluate(script)
+    except Exception as e:
+        raise ValueError(f"应用筛选失败: {e}") from e
 
-
-def _wait_for_initial_state(page: Page, timeout: float = 30.0) -> None:
-    """等待 __INITIAL_STATE__.search.feeds 就绪并 *水合*（feed 带上标题）。
-
-    rednote.com 上 state 对象会先以「只有 id」的形态出现，标题与 xsec_token 稍后填充；
-    只等 `.search` 存在会过早提取到空标题。等到「带标题的 feed 数」不再增长为止，
-    这样提取才同时拿到标题和 xsec_token。"""
-    deadline = time.monotonic() + timeout
-    last_titled = -1
-    while time.monotonic() < deadline:
-        try:
-            titled = int(page.evaluate(_FEEDS_HYDRATED_JS))
-        except Exception:
-            titled = -1
-        if titled > 0 and titled == last_titled:
-            return  # hydrated and stable
-        last_titled = titled
-        time.sleep(0.5)
-    logger.warning("等待 __INITIAL_STATE__ 水合超时 (titled=%s)", last_titled)
-
-
-def _apply_filters(page: Page, filters: list[tuple[int, int]]) -> None:
-    """应用筛选条件。通过文本内容定位筛选项（兼容不同域名 DOM 差异）。"""
-    # 悬停筛选按钮
-    page.hover_element(FILTER_BUTTON)
-
-    # 等待筛选面板出现
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        if page.has_element(FILTER_PANEL):
-            break
-        sleep_random(300, 600)
-
-    # 通过文本内容点击筛选项（比 nth-child 更稳健）
-    for filters_index, tags_index in filters:
-        option_text = _FILTER_OPTIONS[filters_index][tags_index - 1][1]
-        # 在筛选面板中查找匹配文本的标签并点击
-        js = (
-            f"(function(){{"
-            f"var panel=document.querySelector('div.filter-panel');"
-            f"if(!panel)return'no_panel';"
-            f"var groups=panel.querySelectorAll('div.filters');"
-            f"var group=groups[{filters_index - 1}];"
-            f"if(!group)return'no_group';"
-            f"var tags=group.querySelectorAll('div.tags,div.tag,span.tag,span.tags');"
-            f"var target=Array.from(tags).find(function(t){{"
-            f"return t.textContent.trim()==='{option_text}'}});"
-            f"if(!target)return'no_tag';"
-            f"target.click();"
-            f"return'ok';"
-            f"}})()"
-        )
-        result = page.evaluate(js)
-        if result != "ok":
-            logger.warning("筛选 %s 失败: %s", option_text, result)
-        sleep_random(300, 600)
-
-    # 等待页面更新
-    page.wait_dom_stable()
-    _wait_for_initial_state(page)
+    # 等待 __INITIAL_STATE__ 中有新数据
+    _wait_for_search_feeds(page)

@@ -4,7 +4,26 @@
  * 接收来自 background.js 的 DOM 操作命令并执行。
  * evaluate / has_element 等需要访问页面 JS 变量的命令由 background.js
  * 通过 chrome.scripting.executeScript(world:"MAIN") 直接处理，不经过这里。
+ *
+ * 同时负责接收来自 interceptor.js（MAIN world）的 postMessage，
+ * 将 404 诊断事件转发给 background.js 存储。
  */
+
+// ── interceptor.js (MAIN world) → background.js 桥接 ────────
+// 注意：扩展 reload 后老 content script 仍在页面，但 chrome.runtime context 失效。
+// 此时 sendMessage 会同步抛 "Extension context invalidated"（.catch 抓不到），
+// 必须先用 chrome.runtime?.id 检测 context 是否还存活。
+window.addEventListener("message", (e) => {
+  if (e.source !== window) return;
+  if (e.data?.source !== "xhs-interceptor" || e.data?.type !== "BLOCK_EVENT") return;
+  if (!chrome.runtime?.id) return; // context invalidated, orphan content script
+  try {
+    chrome.runtime.sendMessage({ type: "XHS_BLOCK_EVENT", event: e.data.event }).catch(() => {});
+  } catch (_) { /* runtime gone between guard and call */ }
+});
+
+// 通知 interceptor.js：content.js 已就绪，可以 flush 排队的事件
+window.postMessage({ source: "xhs-content-ready" }, "*");
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   handleDomCommand(msg.method, msg.params || {})
@@ -210,3 +229,19 @@ async function cmdSetFileInput({ selector, files }) {
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// ─── NetLog 信号转发 + 启用状态同步 ──────────────────────────────
+
+// MAIN world interceptor → content (postMessage) → background (runtime)
+window.addEventListener("message", (e) => {
+  if (e.source !== window) return;
+  if (e.data?.source !== "xhs-netlog-intercept") return;
+  if (!chrome.runtime?.id) return; // extension reloaded, content script orphaned
+  try {
+    chrome.runtime.sendMessage({
+      type: "NETLOG_INTERCEPTOR_ENTRY",
+      payload: e.data,
+    }).catch(() => {});
+  } catch (_) { /* runtime gone between guard and call */ }
+});
+

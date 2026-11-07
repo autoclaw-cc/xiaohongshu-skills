@@ -82,7 +82,7 @@ def _ensure_bridge_ready(bridge_url: str) -> None:
         scripts_dir = Path(__file__).parent
         kwargs: dict = {}
         if sys.platform == "win32":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         subprocess.Popen(
             [sys.executable, str(scripts_dir / "bridge_server.py")],
             **kwargs,
@@ -418,8 +418,28 @@ def cmd_get_feed_detail(args: argparse.Namespace) -> None:
             args.xsec_token,
             load_all_comments=args.load_all_comments,
             config=config,
+            keyword=getattr(args, "keyword", "篮球"),
         )
         _output(detail.to_dict())
+    except Exception as e:
+        # 附带 404 诊断事件，帮助定位根因
+        diagnostics: list = []
+        try:
+            diagnostics = page.get_404_diagnostics() or []
+        except Exception:
+            pass
+        err_data: dict = {"success": False, "error": str(e)}
+        if diagnostics:
+            latest = diagnostics[-1]
+            err_data["diagnosis"] = {
+                "root_cause": latest.get("diagnosis", {}).get("root_cause"),
+                "cause_category": latest.get("diagnosis", {}).get("cause_category"),
+                "detail": latest.get("diagnosis", {}).get("detail"),
+                "how_xhs_decides": latest.get("diagnosis", {}).get("how_xhs_decides"),
+                "url": latest.get("url"),
+                "final_url": latest.get("final_url"),
+            }
+        _output(err_data, exit_code=2)
     finally:
         browser.close()
 
@@ -669,6 +689,115 @@ def cmd_next_step(args: argparse.Namespace) -> None:
         browser.close()
 
 
+def cmd_diagnose_404(args: argparse.Namespace) -> None:
+    """获取拦截器捕获的 404 诊断事件，打印根因分析报告。"""
+    browser, page = _connect(args)
+    try:
+        if args.clear:
+            page.clear_404_diagnostics()
+            _output({"success": True, "message": "诊断记录已清空"})
+            return
+
+        events = page.get_404_diagnostics()
+        if not events:
+            _output({"success": True, "events": [], "message": "暂无拦截记录，请在小红书页面进行操作后重试"})
+            return
+
+        # 控制台可读报告（写到 stderr）
+        logger.info("═" * 60)
+        logger.info("404 诊断报告 — 共 %d 条拦截记录", len(events))
+        logger.info("═" * 60)
+        for i, ev in enumerate(events, 1):
+            diag = ev.get("diagnosis", {})
+            logger.info(
+                "[%d] %s %s → HTTP %s",
+                i, ev.get("method", "?"), ev.get("url", "?")[:80], ev.get("status", "?"),
+            )
+            logger.info("    根因: %s", diag.get("root_cause", "未知"))
+            logger.info("    详情: %s", diag.get("detail", "")[:120])
+            logger.info("    置信: %s | 类别: %s", diag.get("confidence", "?"), diag.get("cause_category", "?"))
+            logger.info("    时间: %s | 页面: %s", ev.get("timestamp", "?"), ev.get("pageUrl", "?")[:60])
+            cookies = ev.get("cookies", {})
+            req = ev.get("request", {})
+            logger.info(
+                "    凭证: web_session=%s a1=%s xs=%s xsec_token=%s",
+                cookies.get("has_web_session"), cookies.get("has_a1"),
+                req.get("has_xs"), bool(req.get("xsec_token")),
+            )
+            logger.info("─" * 60)
+
+        _output({"success": True, "events": events})
+    finally:
+        browser.close()
+
+
+def cmd_check_risk(args: argparse.Namespace) -> None:
+    """分析小红书风控状态：检测自动化特征与 API 拦截情况。"""
+    import json as _json
+
+    browser, page = _connect(args)
+    try:
+        probe_urls = args.probe_urls or []
+        report = page.analyze_risk_control(probe_urls=probe_urls)
+        if not report:
+            _output({"success": False, "error": "扫描返回空结果"}, exit_code=2)
+            return
+
+        risk_level = report.get("risk_level", "unknown")
+        issues = report.get("issues", [])
+
+        # 控制台可读摘要（写到 stderr，不影响 JSON stdout）
+        logger.info("风控扫描完成 | 等级: %s | 问题数: %d", risk_level.upper(), len(issues))
+        for issue in issues:
+            logger.info("  [%s] %s", issue.get("level", "?").upper(), issue.get("msg", ""))
+
+        _output({"success": True, "report": report})
+    finally:
+        browser.close()
+
+
+def cmd_get_netlog(args: argparse.Namespace) -> None:
+    """获取 NetLog 原始 entries（最多 500 条）。"""
+    browser, page = _connect(args)
+    try:
+        if not page.get_netlog_enabled():
+            print(json.dumps({
+                "error": "netlogger 未启用",
+                "hint": "请打开扩展 popup，标题 XHS Bridge 连点 5 次激活 NetLog 后重试",
+            }, ensure_ascii=False, indent=2))
+            sys.exit(2)
+
+        entries = page.get_netlog()
+        if args.limit:
+            entries = entries[-args.limit:]
+        print(json.dumps({
+            "total": len(entries),
+            "entries": entries,
+        }, ensure_ascii=False, indent=2))
+    finally:
+        browser.close()
+
+
+def cmd_risk_report(args: argparse.Namespace) -> None:
+    """基于 NetLog 数据生成风控分析报告。"""
+    from xhs.risk_analyzer import analyze
+
+    browser, page = _connect(args)
+    try:
+        if not page.get_netlog_enabled():
+            print(json.dumps({
+                "error": "netlogger 未启用",
+                "hint": "请打开扩展 popup，标题 XHS Bridge 连点 5 次激活 NetLog 后重试",
+            }, ensure_ascii=False, indent=2))
+            sys.exit(2)
+
+        entries = page.get_netlog()
+        report = analyze(entries)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    finally:
+        browser.close()
+
+
 def cmd_publish_video(args: argparse.Namespace) -> None:
     """发布视频内容。"""
     from xhs.publish_video import publish_video_content
@@ -773,6 +902,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--max-replies-threshold", type=int, default=10)
     sub.add_argument("--max-comment-items", type=int, default=0)
     sub.add_argument("--scroll-speed", default="normal", help="slow|normal|fast")
+    sub.add_argument("--keyword", default="篮球", help="风控重试时的搜索关键词")
     sub.set_defaults(func=cmd_get_feed_detail)
 
     # user-profile
@@ -877,6 +1007,31 @@ def build_parser() -> argparse.ArgumentParser:
     sub = subparsers.add_parser("next-step", help="点击下一步 + 填写描述")
     sub.add_argument("--content-file", required=True)
     sub.set_defaults(func=cmd_next_step)
+
+    # diagnose-404
+    sub = subparsers.add_parser("diagnose-404", help="获取拦截器捕获的 404 根因诊断报告")
+    sub.add_argument("--clear", action="store_true", help="清空已有诊断记录")
+    sub.set_defaults(func=cmd_diagnose_404)
+
+    # check-risk
+    sub = subparsers.add_parser("check-risk", help="分析小红书风控状态（自动化指纹 + API 探测）")
+    sub.add_argument(
+        "--probe-urls",
+        nargs="*",
+        dest="probe_urls",
+        default=[],
+        help="额外探测的 API URL 列表",
+    )
+    sub.set_defaults(func=cmd_check_risk)
+
+    # get-netlog
+    sub = subparsers.add_parser("get-netlog", help="获取 NetLog 原始 entries（需先在 popup 激活）")
+    sub.add_argument("--limit", type=int, default=None, help="只取最近 N 条")
+    sub.set_defaults(func=cmd_get_netlog)
+
+    # risk-report
+    sub = subparsers.add_parser("risk-report", help="基于 NetLog 生成风控分析报告")
+    sub.set_defaults(func=cmd_risk_report)
 
     return parser
 

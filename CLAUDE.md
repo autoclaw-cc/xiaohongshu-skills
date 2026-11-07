@@ -75,3 +75,5 @@ python scripts/cli.py publish --title-file t.txt --content-file c.txt --images p
 | `long-article` | — | 长文发布（填写+排版） |
 | `select-template` | — | 长文发布（选择模板） |
 | `next-step` | — | 长文发布（下一步+描述） |
+| `get-netlog` | — | 风控数据 |
+| `risk-report` | — | 风控数据 |

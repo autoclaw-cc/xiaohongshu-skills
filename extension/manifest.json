@@ -8,18 +8,33 @@
     "cookies",
     "scripting",
     "alarms",
-    "debugger"
+    "debugger",
+    "storage",
+    "webRequest"
   ],
   "host_permissions": [
-    "https://www.xiaohongshu.com/*",
+    "https://*.xiaohongshu.com/*",
     "https://xiaohongshu.com/*",
-    "https://creator.xiaohongshu.com/*",
     "ws://localhost/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "XHS Bridge"
+  },
   "content_scripts": [
+    {
+      "matches": [
+        "https://www.xiaohongshu.com/*",
+        "https://xiaohongshu.com/*",
+        "https://creator.xiaohongshu.com/*"
+      ],
+      "js": ["interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": [
         "https://www.xiaohongshu.com/*",

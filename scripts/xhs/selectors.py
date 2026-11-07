@@ -16,7 +16,7 @@ LOGIN_ERR_MSG = ".err-msg"
 
 # ========== 首页 / 搜索 ==========
 FILTER_BUTTON = "div.filter"
-FILTER_PANEL = "div.filter-panel"
+FILTER_PANEL = "div.filters-wrapper"
 
 # ========== Feed 详情 ==========
 COMMENTS_CONTAINER = ".comments-container"

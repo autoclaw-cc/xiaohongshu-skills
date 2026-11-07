@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 220px;
+      padding: 16px;
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      color: #333;
+      margin: 0;
+      transition: width 0.2s;
+    }
+    body.netlog-on { width: 580px; }
+    h3 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      color: #111;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .label { color: #666; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .badge.ok  { background: #e6f4ea; color: #1e8e3e; }
+    .badge.err { background: #fce8e6; color: #c5221f; }
+    .badge.loading { background: #f1f3f4; color: #888; }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+    }
+    .dot.ok  { background: #1e8e3e; }
+    .dot.err { background: #c5221f; }
+    .dot.loading { background: #aaa; }
+    .divider { border: none; border-top: 1px solid #eee; margin: 10px 0; }
+    .hint { color: #999; font-size: 11px; line-height: 1.5; }
+    .btn {
+      width: 100%;
+      padding: 6px 0;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      background: #1a73e8;
+      color: #fff;
+      margin-top: 4px;
+    }
+    .btn:disabled { background: #aaa; cursor: default; }
+    .risk-result { margin-top: 8px; font-size: 11px; line-height: 1.6; }
+    .risk-badge {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .risk-safe   { background: #e6f4ea; color: #1e8e3e; }
+    .risk-low    { background: #fef9e7; color: #b7950b; }
+    .risk-medium { background: #fce8e6; color: #c5221f; }
+    .risk-high   { background: #f4c6c6; color: #a50000; }
+    .issue-list  { margin: 4px 0 0; padding: 0; list-style: none; }
+    .issue-list li { padding: 1px 0; color: #555; }
+    .netlog-card { display: none; }
+    body.netlog-on .netlog-card { display: block; }
+    .netlog-tabs { display: flex; gap: 4px; margin-bottom: 6px; }
+    .netlog-tab {
+      padding: 3px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      border-radius: 4px;
+      background: #f1f3f4;
+      color: #555;
+    }
+    .netlog-tab.active { background: #1a73e8; color: #fff; }
+    .netlog-row {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 10px;
+      line-height: 1.5;
+      padding: 2px 4px;
+      border-radius: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+    .netlog-row:hover { background: #f8f9fa; }
+    .netlog-row.cat-fingerprint_upload { color: #b7950b; }
+    .netlog-row.cat-business_error,
+    .netlog-row.cat-risk_redirect,
+    .netlog-row.cat-signature_failure { color: #c5221f; }
+    .netlog-row.cat-cookie_change { color: #1565c0; }
+    .netlog-list { max-height: 320px; overflow-y: auto; border: 1px solid #eee; padding: 4px; border-radius: 4px; }
+    .netlog-detail {
+      background: #fafafa;
+      border: 1px solid #eee;
+      border-radius: 4px;
+      padding: 6px;
+      margin-top: 6px;
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .netlog-toolbar { display: flex; gap: 6px; margin-bottom: 6px; }
+    .netlog-toolbar button {
+      flex: 1;
+      padding: 3px 0;
+      font-size: 11px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h3 id="title-hit" style="cursor:default;user-select:none">XHS Bridge</h3>
+
+  <div class="row">
+    <span class="label">Bridge 服务</span>
+    <span class="badge loading" id="bridge-status">
+      <span class="dot loading" id="bridge-dot"></span>
+      <span id="bridge-text">检测中...</span>
+    </span>
+  </div>
+
+  <div class="row">
+    <span class="label">扩展连接</span>
+    <span class="badge loading" id="ext-status">
+      <span class="dot loading" id="ext-dot"></span>
+      <span id="ext-text">检测中...</span>
+    </span>
+  </div>
+
+  <hr class="divider">
+  <p class="hint" id="hint">正在连接 bridge server...</p>
+
+  <hr class="divider">
+  <button class="btn" id="scan-btn">扫描风控</button>
+  <div class="risk-result" id="risk-result" style="display:none">
+    <div>风险等级：<span class="risk-badge" id="risk-level-badge">-</span></div>
+    <ul class="issue-list" id="issue-list"></ul>
+  </div>
+
+  <hr class="divider">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <span style="font-size:12px;font-weight:600;color:#333">404 诊断</span>
+    <span class="badge loading" id="intercept-badge" style="font-size:10px;padding:1px 6px">
+      <span class="dot loading" id="intercept-dot"></span>
+      <span id="intercept-count">监听中</span>
+    </span>
+  </div>
+  <div id="event-list" style="font-size:10px;line-height:1.6;max-height:160px;overflow-y:auto"></div>
+  <button class="btn" id="clear-btn" style="background:#888;margin-top:4px;font-size:11px;padding:4px 0">清空记录</button>
+
+  <hr class="divider">
+  <div class="netlog-card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <span style="font-size:12px;font-weight:600;color:#333">NetLog</span>
+      <span style="font-size:10px;color:#888" id="netlog-count">0 条</span>
+    </div>
+    <div class="netlog-tabs">
+      <div class="netlog-tab active" data-tab="stream">时序流</div>
+      <div class="netlog-tab" data-tab="category">检测维度</div>
+    </div>
+    <div class="netlog-toolbar">
+      <button id="netlog-clear">清空</button>
+      <button id="netlog-export">导出 JSON</button>
+      <button id="netlog-disable">关闭</button>
+    </div>
+    <div class="netlog-list" id="netlog-list"></div>
+    <div class="netlog-detail" id="netlog-detail" style="display:none"></div>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
