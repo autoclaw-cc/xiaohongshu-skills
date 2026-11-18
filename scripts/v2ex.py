@@ -74,7 +74,7 @@ def trim(topic: dict[str, Any]) -> dict[str, Any]:
         "title": topic.get("title"),
         "author": member.get("username"),
         "node": node.get("name"),
-        "created": topic.get("last_modified") or topic.get("last_touched"),
+        "created": topic.get("created"),
         "url": topic.get("url"),
         "replies": topic.get("replies"),
         "excerpt": (topic.get("content") or "")[:200],
